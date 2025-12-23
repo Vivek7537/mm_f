@@ -1,5 +1,6 @@
 // src/components/Analytics.jsx
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useOrders } from '../hooks/useOrders';
 import { useEditorStats } from '../context/EditorStatsContext';
 import { Card, CardContent, Typography, Grid, Box, Select, MenuItem, FormControl, InputLabel, Button, Chip, LinearProgress } from '@mui/material';
@@ -11,41 +12,38 @@ import {
     Pending as PendingIcon,
     People as PeopleIcon,
     TrendingUp as TrendingUpIcon,
+    Group as GroupIcon,
 } from '@mui/icons-material';
 
 const Analytics = ({ onNavigateToPerformance }) => {
     const { orders, loading: ordersLoading } = useOrders();
     const { editorStats, loading: statsLoading } = useEditorStats();
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+    const navigate = useNavigate();
 
     if (ordersLoading || statsLoading) return <div>Loading...</div>;
 
     const totalOrders = orders.length;
 
-    // Use real editor stats for more accurate data
-    const assignedPerEditor = editorStats.map(editor => ({
-        name: editor.name || editor.email.split('@')[0],
-        assigned: editor.totalAssigned || 0,
-    }));
-
-    const pendingPerEditor = editorStats.map(editor => ({
-        name: editor.name || editor.email.split('@')[0],
-        pending: editor.currentWorkload || 0,
-    }));
-
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
-    const ordersThisMonth = orders.filter(o => {
+    const monthlyOrders = orders.filter(o => {
         const created = o.createdAt?.toDate();
         return created && created.getMonth() === currentMonth && created.getFullYear() === currentYear;
-    }).length;
+    });
+    const ordersThisMonth = monthlyOrders.length;
 
-    // Use real editor stats for performance data
-    const performanceData = editorStats.map(editor => ({
-        name: editor.name || editor.email.split('@')[0],
-        assigned: editor.totalAssigned || 0,
-        completed: editor.totalCompleted || 0,
-    }));
+    // Calculate all stats from live `orders` data for consistency
+    const performanceData = editorStats.map(editor => {
+        const editorOrders = orders.filter(o => o.assignedEditorEmails?.includes(editor.email));
+        return {
+            email: editor.email,
+            name: editor.name || editor.email.split('@')[0],
+            assigned: editorOrders.length,
+            completed: editorOrders.filter(o => o.status === 'completed').length,
+            pending: editorOrders.filter(o => o.status === 'pending' || o.status === 'in-progress').length,
+        };
+    });
 
     const avgCompletionTime = () => {
         // Calculate from editor stats if available, otherwise fallback to orders
@@ -63,22 +61,22 @@ const Analytics = ({ onNavigateToPerformance }) => {
         return Math.round((totalTurnaround / totalCompleted) / 24); // Convert hours to days
     };
 
-    const monthlyData = Array.from({ length: 12 }, (_, i) => {
-        const month = new Date(currentYear, i).toLocaleString('default', { month: 'short' });
-        const count = orders.filter(o => {
-            const created = o.createdAt?.toDate();
-            return created && created.getMonth() === i && created.getFullYear() === currentYear;
-        }).length;
-        return { month, orders: count };
-    });
+    const monthlyData = Array.from({ length: 12 }, (_, i) => ({
+        month: new Date(currentYear, i).toLocaleString('default', { month: 'short' }),
+        orders: orders.filter(o => o.createdAt?.toDate().getMonth() === i && o.createdAt?.toDate().getFullYear() === currentYear).length
+    }));
 
-    const pendingData = pendingPerEditor.filter(item => item.pending > 0);
+    const pendingData = performanceData.filter(item => item.pending > 0);
 
-    // Calculate team performance metrics
-    const totalAssigned = editorStats.reduce((sum, editor) => sum + (editor.totalAssigned || 0), 0);
-    const totalCompleted = editorStats.reduce((sum, editor) => sum + (editor.totalCompleted || 0), 0);
-    const totalWorkload = editorStats.reduce((sum, editor) => sum + (editor.currentWorkload || 0), 0);
-    const completionRate = totalAssigned > 0 ? Math.round((totalCompleted / totalAssigned) * 100) : 0;
+    // Calculate team performance metrics from live data
+    const totalCompleted = orders.filter(o => o.status === 'completed').length;
+    const totalAssignedForRate = orders.length; // Using total orders as the base for completion rate
+    const totalWorkload = orders.filter(o => o.status === 'pending' || o.status === 'in-progress').length;
+    const completionRate = totalAssignedForRate > 0 ? Math.round((totalCompleted / totalAssignedForRate) * 100) : 0;
+
+    const totalSharedOrders = orders.filter(o => o.assignedEditorEmails?.length > 1).length;
+    const sharedWorkload = orders.filter(o => o.assignedEditorEmails?.length > 1 && (o.status === 'pending' || o.status === 'in-progress')).length;
+    const inProgressCount = orders.filter(o => o.status === 'in-progress').length;
 
     return (
         <Box>
@@ -94,6 +92,8 @@ const Analytics = ({ onNavigateToPerformance }) => {
                 </Button>
             </Box>
 
+            {/* {------------startttttt} */}
+
             {/* Summary Cards */}
             <Grid container spacing={3} sx={{ mb: 4 }}>
                 <Grid item xs={12} sm={6} md={3}>
@@ -108,7 +108,10 @@ const Analytics = ({ onNavigateToPerformance }) => {
                     </Card>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                    <Card sx={{ backgroundColor: '#F3E5F5', borderLeft: '4px solid #9C27B0' }}>
+                    <Card
+                        sx={{ backgroundColor: '#F3E5F5', borderLeft: '4px solid #9C27B0', cursor: 'pointer' }}
+                        onClick={() => navigate('/orders/monthly', { state: { orders: monthlyOrders, month: currentMonth, year: currentYear } })}
+                    >
                         <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
                             <MonthlyIcon sx={{ fontSize: 40, color: '#9C27B0', mr: 2 }} />
                             <Box>
@@ -135,13 +138,53 @@ const Analytics = ({ onNavigateToPerformance }) => {
                             <TimeIcon sx={{ fontSize: 40, color: '#4CAF50', mr: 2 }} />
                             <Box>
                                 <Typography color="textSecondary" gutterBottom>Completed Orders</Typography>
-                                <Typography variant="h4" sx={{ fontWeight: 'bold' }}>{orders.filter(o => o.status === 'completed').length}</Typography>
+                                <Typography variant="h4" sx={{ fontWeight: 'bold' }}>{totalCompleted}</Typography>
                             </Box>
                         </CardContent>
                     </Card>
                 </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <Card sx={{ backgroundColor: '#E3F2FD', borderLeft: '4px solid #1976D2' }}>
+                        <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
+                            <TrendingUpIcon sx={{ fontSize: 40, color: '#1976D2', mr: 2 }} />
+                            <Box>
+                                <Typography color="textSecondary" gutterBottom>In-Progress</Typography>
+                                <Typography variant="h4" sx={{ fontWeight: 'bold' }}>{inProgressCount}</Typography>
+                            </Box>
+                        </CardContent>
+                    </Card>
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <Card sx={{ backgroundColor: '#E0F7FA', borderLeft: '4px solid #00BCD4' }}>
+                        <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
+                            <GroupIcon sx={{ fontSize: 40, color: '#00BCD4', mr: 2 }} />
+                            <Box>
+                                <Typography color="textSecondary" gutterBottom>Total Shared</Typography>
+                                <Typography variant="h4" sx={{ fontWeight: 'bold' }}>{totalSharedOrders}</Typography>
+                            </Box>
+                        </CardContent>
+                    </Card>
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                    <Card sx={{ backgroundColor: '#E1F5FE', borderLeft: '4px solid #0288D1' }}>
+                        <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
+                            <GroupIcon sx={{ fontSize: 40, color: '#0288D1', mr: 2 }} />
+                            <Box>
+                                <Typography color="textSecondary" gutterBottom>Shared Workload</Typography>
+                                <Typography variant="h4" sx={{ fontWeight: 'bold' }}>{sharedWorkload}</Typography>
+                            </Box>
+                        </CardContent>
+                    </Card>
+                </Grid>
+
             </Grid>
 
+            {/* Shared Metrics */}
+            <Grid container spacing={3} sx={{ mb: 4 }}>
+
+            </Grid>
+
+            {/* {endd-----------} */}
             {/* Editor Performance Summary Cards */}
             <Grid container spacing={3} sx={{ mb: 4 }}>
                 <Grid item xs={12} sm={6} md={3}>
@@ -157,12 +200,15 @@ const Analytics = ({ onNavigateToPerformance }) => {
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                     <Card sx={{ backgroundColor: '#FFF8E1', borderLeft: '4px solid #FFC107' }}>
-                        <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
-                            <TrendingUpIcon sx={{ fontSize: 40, color: '#FFC107', mr: 2 }} />
-                            <Box>
-                                <Typography color="textSecondary" gutterBottom>Completion Rate</Typography>
-                                <Typography variant="h4" sx={{ fontWeight: 'bold' }}>{completionRate}%</Typography>
+                        <CardContent sx={{ p: 3 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                                <TrendingUpIcon sx={{ fontSize: 40, color: '#FFC107', mr: 2 }} />
+                                <Box>
+                                    <Typography color="textSecondary" gutterBottom>Completion Rate</Typography>
+                                    <Typography variant="h4" sx={{ fontWeight: 'bold' }}>{completionRate}%</Typography>
+                                </Box>
                             </Box>
+                            {/* <LinearProgress variant="determinate" value={completionRate} sx={{ height: 8, borderRadius: 4 }} color="warning" /> */}
                         </CardContent>
                     </Card>
                 </Grid>
@@ -177,17 +223,7 @@ const Analytics = ({ onNavigateToPerformance }) => {
                         </CardContent>
                     </Card>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                    <Card sx={{ backgroundColor: '#E3F2FD', borderLeft: '4px solid #03A9F4' }}>
-                        <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
-                            <TimeIcon sx={{ fontSize: 40, color: '#03A9F4', mr: 2 }} />
-                            <Box>
-                                <Typography color="textSecondary" gutterBottom>Avg Turnaround</Typography>
-                                <Typography variant="h4" sx={{ fontWeight: 'bold' }}>{avgCompletionTime()}d</Typography>
-                            </Box>
-                        </CardContent>
-                    </Card>
-                </Grid>
+
             </Grid>
 
             {/* Analytics Section */}
@@ -230,11 +266,11 @@ const Analytics = ({ onNavigateToPerformance }) => {
             <Card sx={{ p: 3, mb: 4 }}>
                 <Typography variant="h6" gutterBottom sx={{ mb: 3 }}>Editor Status Overview</Typography>
                 <Grid container spacing={2}>
-                    {editorStats.map((editor) => {
-                        const workloadPercentage = editor.totalAssigned > 0 ?
-                            Math.min((editor.currentWorkload / editor.totalAssigned) * 100, 100) : 0;
-                        const completionRate = editor.totalAssigned > 0 ?
-                            Math.round((editor.totalCompleted / editor.totalAssigned) * 100) : 0;
+                    {performanceData.map((editor) => {
+                        const workloadPercentage = editor.assigned > 0 ?
+                            Math.min((editor.pending / editor.assigned) * 100, 100) : 0;
+                        const editorCompletionRate = editor.assigned > 0 ?
+                            Math.round((editor.completed / editor.assigned) * 100) : 0;
 
                         return (
                             <Grid item xs={12} sm={6} md={3} key={editor.email}>
@@ -242,7 +278,7 @@ const Analytics = ({ onNavigateToPerformance }) => {
                                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                                         <PeopleIcon sx={{ mr: 1, color: 'primary.main' }} />
                                         <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                                            {editor.name || editor.email.split('@')[0]}
+                                            {editor.name}
                                         </Typography>
                                     </Box>
 
@@ -250,7 +286,7 @@ const Analytics = ({ onNavigateToPerformance }) => {
                                         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                                             <Typography variant="body2" color="text.secondary">Workload</Typography>
                                             <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                                                {editor.currentWorkload || 0}/{editor.totalAssigned || 0}
+                                                {editor.pending}/{editor.assigned}
                                             </Typography>
                                         </Box>
                                         <LinearProgress
@@ -272,18 +308,18 @@ const Analytics = ({ onNavigateToPerformance }) => {
                                         <Box>
                                             <Typography variant="body2" color="text.secondary">Completion Rate</Typography>
                                             <Typography variant="h6" sx={{
-                                                color: completionRate >= 80 ? 'success.main' :
-                                                    completionRate >= 60 ? 'warning.main' : 'error.main'
+                                                color: editorCompletionRate >= 80 ? 'success.main' :
+                                                    editorCompletionRate >= 60 ? 'warning.main' : 'error.main'
                                             }}>
-                                                {completionRate}%
+                                                {editorCompletionRate}%
                                             </Typography>
                                         </Box>
                                         <Chip
-                                            label={editor.currentWorkload > 5 ? 'Busy' :
-                                                editor.currentWorkload > 2 ? 'Active' : 'Available'}
+                                            label={editor.pending > 5 ? 'Busy' :
+                                                editor.pending > 2 ? 'Active' : 'Available'}
                                             size="small"
-                                            color={editor.currentWorkload > 5 ? 'error' :
-                                                editor.currentWorkload > 2 ? 'warning' : 'success'}
+                                            color={editor.pending > 5 ? 'error' :
+                                                editor.pending > 2 ? 'warning' : 'success'}
                                             variant="outlined"
                                         />
                                     </Box>

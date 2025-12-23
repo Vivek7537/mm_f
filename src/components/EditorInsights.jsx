@@ -33,6 +33,7 @@ import {
     Work as WorkIcon,
     Timeline as TimelineIcon,
     Refresh as RefreshIcon,
+    Group as GroupIcon,
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { useAuth } from '../context/AuthContext';
@@ -45,74 +46,128 @@ const EditorInsights = () => {
     const { user } = useAuth();
     const { editorStats, loading, refreshStats } = useEditorStats();
     const { orders: allOrders, loading: ordersLoading } = useOrders();
-    const [selectedEditor, setSelectedEditor] = useState(null);
+    const [selectedEditorEmail, setSelectedEditorEmail] = useState(null);
 
-    // Debug logging
+    const enrichedEditorStats = useMemo(() => {
+        if (!editorStats || !allOrders) return [];
+        return editorStats.map(editor => {
+            const ordersForEditor = allOrders.filter(o => o.assignedEditorEmails?.includes(editor.email));
+            return {
+                ...editor,
+                liveTotalAssigned: ordersForEditor.length,
+                liveTotalCompleted: ordersForEditor.filter(o => o.status === 'completed').length
+            };
+        }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }, [editorStats, allOrders]);
+
     useEffect(() => {
-        console.log('EditorInsights - editorStats:', editorStats);
-        console.log('EditorInsights - loading:', loading);
-        console.log('EditorInsights - allOrders:', allOrders);
-        console.log('EditorInsights - ordersLoading:', ordersLoading);
-    }, [editorStats, loading, allOrders, ordersLoading]);
+        if (enrichedEditorStats.length > 0 && !selectedEditorEmail) {
+            setSelectedEditorEmail(enrichedEditorStats[0].email);
+        }
+    }, [enrichedEditorStats, selectedEditorEmail]);
+
+    const selectedEditor = useMemo(() => {
+        return enrichedEditorStats.find(e => e.email === selectedEditorEmail) || null;
+    }, [enrichedEditorStats, selectedEditorEmail]);
 
     // Filter orders for selected editor
     const editorOrders = useMemo(() => {
-        if (!selectedEditor || !allOrders) return [];
-        console.log('All orders:', allOrders);
-        console.log('Filtering orders for editor:', selectedEditor.email, 'name:', selectedEditor.name);
-        const filtered = allOrders.filter(order => {
-            const matchesEmail = order.assignedToEmail === selectedEditor.email;
-            const matchesName = order.assignedToName === selectedEditor.name;
-            console.log('Checking order:', order.id, 'assignedToEmail:', order.assignedToEmail, 'assignedToName:', order.assignedToName, 'matchesEmail:', matchesEmail, 'matchesName:', matchesName);
-            return matchesEmail || matchesName;
-        });
-        console.log('Filtered orders:', filtered);
-        return filtered;
-    }, [selectedEditor, allOrders]);
+        if (!selectedEditorEmail || !allOrders) return [];
+        return allOrders.filter(order => order.assignedEditorEmails?.includes(selectedEditorEmail));
+    }, [selectedEditorEmail, allOrders]);
 
-    useEffect(() => {
-        if (editorStats.length > 0 && !selectedEditor) {
-            setSelectedEditor(editorStats[0]);
-        } else if (editorStats.length > 0 && selectedEditor) {
-            // Check if selectedEditor still exists in the updated stats
-            const stillExists = editorStats.find(editor => editor.email === selectedEditor.email);
-            if (!stillExists) {
-                setSelectedEditor(editorStats[0]);
+    // Calculate metrics locally to include In-Progress and Shared stats
+    const localMetrics = useMemo(() => {
+        if (!editorOrders) return { workload: 0, sharedPending: 0, sharedInProgress: 0 };
+
+        let workload = 0;
+        let sharedPending = 0;
+        let sharedInProgress = 0;
+
+        editorOrders.forEach(order => {
+            const isShared = order.assignedEditorEmails?.length > 1;
+
+            if (order.status === 'pending' || order.status === 'in-progress') {
+                workload++; // Include both pending and in-progress in workload
+                if (isShared && order.status === 'pending') sharedPending++;
+                if (isShared && order.status === 'in-progress') sharedInProgress++;
             }
-        } else if (editorStats.length === 0) {
-            setSelectedEditor(null);
-        }
-    }, [editorStats, selectedEditor]);
+        });
 
-    // Debug selectedEditor
-    useEffect(() => {
-        console.log('Selected editor changed:', selectedEditor);
-    }, [selectedEditor]);
+        return { workload, sharedPending, sharedInProgress };
+    }, [editorOrders]);
+
+    const recentActivity = useMemo(() => {
+        if (!editorOrders || !selectedEditor) return [];
+
+        return editorOrders
+            .filter(order => order.status === 'completed' && order.completedAt)
+            .sort((a, b) => {
+                const tA = a.completedAt?.seconds || 0;
+                const tB = b.completedAt?.seconds || 0;
+                return tB - tA;
+            })
+            .slice(0, 5)
+            .map(order => ({
+                id: order.id,
+                customerName: order.name,
+                editorName: selectedEditor.name || selectedEditor.email?.split('@')[0] || 'Editor',
+                timestamp: order.completedAt
+            }));
+    }, [editorOrders, selectedEditor]);
 
     const formatDate = (timestamp) => {
         if (!timestamp) return 'N/A';
         return new Date(timestamp.seconds * 1000).toLocaleDateString();
     };
 
-    const calculateAverageTurnaround = (stats) => {
-        if (!stats.completedOrders || stats.completedOrders.length === 0) return 0;
-        const totalHours = stats.completedOrders.reduce((sum, order) => {
-            const assignedDate = new Date(order.assignedAt.seconds * 1000);
-            const completedDate = new Date(order.completedAt.seconds * 1000);
-            return sum + (completedDate - assignedDate) / (1000 * 60 * 60);
-        }, 0);
-        return (totalHours / stats.completedOrders.length).toFixed(1);
-    };
+    const averageTurnaround = useMemo(() => {
+        if (!editorOrders || editorOrders.length === 0) return 0;
 
-    const getPerformanceData = (stats) => {
-        if (!stats.monthlyStats) return [];
-        return Object.entries(stats.monthlyStats).map(([month, data]) => ({
-            month,
-            completed: data.completed || 0,
-            assigned: data.assigned || 0,
-            avgTurnaround: data.avgTurnaround || 0,
+        const completedOrders = editorOrders.filter(o => o.status === 'completed' && o.completedAt && o.createdAt);
+        if (completedOrders.length === 0) return 0;
+
+        const totalHours = completedOrders.reduce((sum, order) => {
+            const start = order.createdAt.toDate();
+            const end = order.completedAt.toDate();
+            return sum + (end - start) / (1000 * 60 * 60);
+        }, 0);
+
+        return (totalHours / completedOrders.length).toFixed(1);
+    }, [editorOrders]);
+
+    const performanceData = useMemo(() => {
+        if (!editorOrders) return [];
+
+        const stats = {};
+
+        editorOrders.forEach(order => {
+            if (order.createdAt) {
+                const date = order.createdAt.toDate();
+                const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                const monthName = date.toLocaleString('default', { month: 'short' });
+                if (!stats[key]) stats[key] = { month: monthName, assigned: 0, completed: 0, totalTurnaround: 0, turnaroundCount: 0 };
+                stats[key].assigned += 1;
+            }
+            if (order.status === 'completed' && order.completedAt && order.createdAt) {
+                const date = order.completedAt.toDate();
+                const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                const monthName = date.toLocaleString('default', { month: 'short' });
+                if (!stats[key]) stats[key] = { month: monthName, assigned: 0, completed: 0, totalTurnaround: 0, turnaroundCount: 0 };
+                stats[key].completed += 1;
+                const hours = (order.completedAt.toDate() - order.createdAt.toDate()) / (1000 * 60 * 60);
+                stats[key].totalTurnaround += hours;
+                stats[key].turnaroundCount += 1;
+            }
+        });
+
+        return Object.keys(stats).sort().map(key => ({
+            month: stats[key].month,
+            assigned: stats[key].assigned,
+            completed: stats[key].completed,
+            avgTurnaround: stats[key].turnaroundCount > 0 ? parseFloat((stats[key].totalTurnaround / stats[key].turnaroundCount).toFixed(1)) : 0
         }));
-    };
+    }, [editorOrders]);
 
     const getWorkloadColor = (workload) => {
         if (workload >= 80) return 'error';
@@ -138,7 +193,7 @@ const EditorInsights = () => {
                     Editor Insights
                 </Typography>
                 <Tooltip title="Refresh Data">
-                    <IconButton onClick={refreshStats} color="primary">
+                    <IconButton color="default">
                         <RefreshIcon />
                     </IconButton>
                 </Tooltip>
@@ -146,53 +201,100 @@ const EditorInsights = () => {
 
             <Grid container spacing={3}>
                 {/* Editor List */}
-                <Grid item xs={12} md={4}>
-                    <Box>
-                        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <Grid item xs={12} md={3}>
+                    <Box
+                        sx={{
+                            position: { md: 'sticky' },
+                            top: { md: 100 },
+                        }}
+                    >
+                        <Typography
+                            variant="h6"
+                            gutterBottom
+                            sx={{ display: 'flex', alignItems: 'center', mb: 2 }}
+                        >
                             <PersonIcon sx={{ mr: 1 }} />
                             Editors ({editorStats.length})
                         </Typography>
-                        <List sx={{ p: 0 }}>
-                            {editorStats.map((editor) => (
-                                <ListItem
-                                    key={editor.email}
-                                    button
-                                    onClick={() => setSelectedEditor(editor)}
-                                    sx={{
-                                        p: 2,
-                                        mb: 1.5,
-                                        borderRadius: 2,
-                                        transition: 'all 0.3s ease',
-                                        border: '1px solid',
-                                        borderColor: selectedEditor?.email === editor.email ? 'transparent' : 'divider',
-                                        background: selectedEditor?.email === editor.email ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'background.paper',
-                                        color: selectedEditor?.email === editor.email ? 'white' : 'text.primary',
-                                        boxShadow: selectedEditor?.email === editor.email ? '0 4px 12px 0 rgba(118, 75, 162, 0.3)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                        '&:hover': {
-                                            transform: 'translateY(-2px)',
-                                            boxShadow: '0 4px 12px 0 rgba(0,0,0,0.08)'
-                                        }
-                                    }}
-                                >
-                                    <ListItemAvatar>
-                                        <Avatar sx={{ bgcolor: selectedEditor?.email === editor.email ? 'rgba(255,255,255,0.2)' : 'primary.light' }}>
+
+                        {/* Horizontal Editor Row */}
+                        <Box
+                            sx={{
+                                display: 'flex',
+                                gap: 2,
+                                flexWrap: 'wrap',
+                                justifyContent: { xs: 'center', md: 'flex-start' },
+                            }}
+                        >
+                            {enrichedEditorStats.map((editor) => {
+                                const isSelected = selectedEditorEmail === editor.email;
+
+                                return (
+                                    <Box
+                                        key={editor.email}
+                                        onClick={() => setSelectedEditorEmail(editor.email)}
+                                        sx={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 1.5,
+                                            cursor: 'pointer',
+                                            p: { xs: 1, md: 2 },
+                                            minWidth: { md: 240 },
+                                            borderRadius: 2,
+                                            border: '1px solid',
+                                            borderColor: isSelected ? 'transparent' : 'divider',
+                                            background: isSelected
+                                                ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                                                : 'background.paper',
+                                            color: isSelected ? 'white' : 'text.primary',
+                                            boxShadow: isSelected
+                                                ? '0 4px 12px rgba(118,75,162,0.3)'
+                                                : '0 1px 3px rgba(0,0,0,0.05)',
+                                            transition: 'all 0.3s ease',
+                                            '&:hover': {
+                                                transform: 'translateY(-2px)',
+                                                boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                                            },
+                                        }}
+                                    >
+                                        {/* Avatar – ALWAYS visible */}
+                                        <Avatar
+                                            sx={{
+                                                bgcolor: isSelected
+                                                    ? 'rgba(255,255,255,0.25)'
+                                                    : 'primary.light',
+                                            }}
+                                        >
                                             {editor.name?.charAt(0)?.toUpperCase() || 'E'}
                                         </Avatar>
-                                    </ListItemAvatar>
-                                    <ListItemText
-                                        primary={editor.name || editor.email}
-                                        secondary={`${editor.totalAssigned || 0} Assigned / ${editor.totalCompleted || 0} Completed`}
-                                        primaryTypographyProps={{ fontWeight: 600 }}
-                                        secondaryTypographyProps={{ color: selectedEditor?.email === editor.email ? 'rgba(255,255,255,0.7)' : 'text.secondary' }}
-                                    />
-                                </ListItem>
-                            ))}
-                        </List>
+
+                                        {/* Text – hidden on mobile */}
+                                        <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+                                            <Typography fontWeight={600}>
+                                                {editor.name || editor.email}
+                                            </Typography>
+                                            <Typography
+                                                variant="caption"
+                                                sx={{
+                                                    color: isSelected
+                                                        ? 'rgba(255,255,255,0.7)'
+                                                        : 'text.secondary',
+                                                }}
+                                            >
+                                                {editor.liveTotalAssigned || 0} Assigned /{' '}
+                                                {editor.liveTotalCompleted || 0} Completed
+                                            </Typography>
+                                        </Box>
+                                    </Box>
+                                );
+                            })}
+                        </Box>
                     </Box>
                 </Grid>
 
+
                 {/* Editor Details */}
-                <Grid item xs={12} md={8}>
+                <Grid item xs={12} md={9}>
                     {selectedEditor ? (
                         <>
                             {/* Profile Header */}
@@ -207,12 +309,12 @@ const EditorInsights = () => {
                                             <Typography variant="body2" color="text.secondary">
                                                 {selectedEditor.email}
                                             </Typography>
-                                            <Chip
+                                            {/* <Chip
                                                 label={`Active since ${formatDate(selectedEditor.createdAt)}`}
                                                 size="small"
                                                 variant="outlined"
                                                 sx={{ mt: 1 }}
-                                            />
+                                            /> */}
                                         </Box>
                                     </Box>
                                 </CardContent>
@@ -224,7 +326,7 @@ const EditorInsights = () => {
                                     <Card>
                                         <CardContent sx={{ textAlign: 'center' }}>
                                             <AssignmentIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-                                            <Typography variant="h4">{selectedEditor.totalAssigned || 0}</Typography>
+                                            <Typography variant="h4">{selectedEditor?.liveTotalAssigned || 0}</Typography>
                                             <Typography variant="body2" color="text.secondary">
                                                 Total Assigned
                                             </Typography>
@@ -235,7 +337,7 @@ const EditorInsights = () => {
                                     <Card>
                                         <CardContent sx={{ textAlign: 'center' }}>
                                             <CheckCircleIcon color="success" sx={{ fontSize: 40, mb: 1 }} />
-                                            <Typography variant="h4">{selectedEditor.totalCompleted || 0}</Typography>
+                                            <Typography variant="h4">{selectedEditor?.liveTotalCompleted || 0}</Typography>
                                             <Typography variant="body2" color="text.secondary">
                                                 Completed
                                             </Typography>
@@ -246,7 +348,7 @@ const EditorInsights = () => {
                                     <Card>
                                         <CardContent sx={{ textAlign: 'center' }}>
                                             <ScheduleIcon color="warning" sx={{ fontSize: 40, mb: 1 }} />
-                                            <Typography variant="h4">{calculateAverageTurnaround(selectedEditor)}h</Typography>
+                                            <Typography variant="h4">{averageTurnaround}h</Typography>
                                             <Typography variant="body2" color="text.secondary">
                                                 Avg Turnaround
                                             </Typography>
@@ -256,10 +358,32 @@ const EditorInsights = () => {
                                 <Grid item xs={6} sm={3}>
                                     <Card>
                                         <CardContent sx={{ textAlign: 'center' }}>
-                                            <WorkIcon color={getWorkloadColor(selectedEditor.currentWorkload || 0)} sx={{ fontSize: 40, mb: 1 }} />
-                                            <Typography variant="h4">{selectedEditor.currentWorkload || 0}</Typography>
+                                            <WorkIcon color={getWorkloadColor(localMetrics.workload)} sx={{ fontSize: 40, mb: 1, color: '#F44336' }} />
+                                            <Typography variant="h4">{localMetrics.workload}</Typography>
                                             <Typography variant="body2" color="text.secondary">
                                                 Current Workload
+                                            </Typography>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                                <Grid item xs={6} sm={3}>
+                                    <Card>
+                                        <CardContent sx={{ textAlign: 'center' }}>
+                                            <GroupIcon sx={{ fontSize: 40, mb: 1, color: '#9C27B0' }} />
+                                            <Typography variant="h4">{localMetrics.sharedPending}</Typography>
+                                            <Typography variant="body2" color="text.secondary">
+                                                Shared Pending
+                                            </Typography>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                                <Grid item xs={6} sm={3}>
+                                    <Card>
+                                        <CardContent sx={{ textAlign: 'center' }}>
+                                            <GroupIcon sx={{ fontSize: 40, mb: 1, color: '#7B1FA2' }} />
+                                            <Typography variant="h4">{localMetrics.sharedInProgress}</Typography>
+                                            <Typography variant="body2" color="text.secondary">
+                                                Shared In-Progress
                                             </Typography>
                                         </CardContent>
                                     </Card>
@@ -274,7 +398,7 @@ const EditorInsights = () => {
                                         Monthly Performance
                                     </Typography>
                                     <ResponsiveContainer width="100%" height={300}>
-                                        <BarChart data={getPerformanceData(selectedEditor)}>
+                                        <BarChart data={performanceData}>
                                             <CartesianGrid strokeDasharray="3 3" />
                                             <XAxis dataKey="month" />
                                             <YAxis />
@@ -294,7 +418,7 @@ const EditorInsights = () => {
                                         Turnaround Time Trend
                                     </Typography>
                                     <ResponsiveContainer width="100%" height={250}>
-                                        <LineChart data={getPerformanceData(selectedEditor)}>
+                                        <LineChart data={performanceData}>
                                             <CartesianGrid strokeDasharray="3 3" />
                                             <XAxis dataKey="month" />
                                             <YAxis />
@@ -312,21 +436,21 @@ const EditorInsights = () => {
                                         Recent Activity
                                     </Typography>
                                     <List>
-                                        {selectedEditor.recentActivity?.slice(0, 5).map((activity, index) => (
-                                            <React.Fragment key={index}>
+                                        {recentActivity.length > 0 ? recentActivity.map((activity, index) => (
+                                            <React.Fragment key={activity.id}>
                                                 <ListItem>
                                                     <ListItemText
-                                                        primary={activity.description}
-                                                        secondary={formatDate(activity.timestamp)}
+                                                        primary={`Completed order for ${activity.customerName}`}
+                                                        secondary={`Updated by ${activity.editorName} • ${formatDate(activity.timestamp)}`}
                                                     />
                                                 </ListItem>
-                                                {index < 4 && <Divider />}
+                                                {index < recentActivity.length - 1 && <Divider />}
                                             </React.Fragment>
-                                        )) || (
-                                                <ListItem>
-                                                    <ListItemText primary="No recent activity" />
-                                                </ListItem>
-                                            )}
+                                        )) : (
+                                            <ListItem>
+                                                <ListItemText primary="No recent activity" />
+                                            </ListItem>
+                                        )}
                                     </List>
                                 </CardContent>
                             </Card>

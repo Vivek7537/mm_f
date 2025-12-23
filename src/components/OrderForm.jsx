@@ -6,7 +6,6 @@ import { useAuth } from '../context/AuthContext';
 import {
     TextField,
     Button,
-    Container,
     Typography,
     Box,
     FormControl,
@@ -16,27 +15,13 @@ import {
     RadioGroup,
     FormControlLabel,
     Radio,
-    Autocomplete,
     Paper,
     Grid,
     Link,
-    InputAdornment,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { toast } from 'react-toastify';
-
-/* -------------------- COUNTRY DATA -------------------- */
-
-const countries = [
-    { name: 'India', code: '+91' },
-    { name: 'United States', code: '+1' },
-    { name: 'United Kingdom', code: '+44' },
-    { name: 'UAE', code: '+971' },
-    { name: 'Saudi Arabia', code: '+966' },
-    { name: 'Canada', code: '+1' },
-    { name: 'Australia', code: '+61' },
-];
 
 /* -------------------- EDITORS -------------------- */
 
@@ -49,7 +34,7 @@ const editors = [
 
 /* -------------------- STYLES -------------------- */
 
-const GradientTextField = styled(TextField)(({ theme }) => ({
+const GradientTextField = styled(TextField)(() => ({
     '& label.Mui-focused': { color: '#667eea' },
     '& .MuiOutlinedInput-root': {
         borderRadius: 14,
@@ -77,50 +62,34 @@ const OrderForm = ({ onOrderCreated }) => {
 
     const [form, setForm] = useState({
         name: '',
-        whatsapp: '',
-        country: '',
         telecaller: '',
+        remark: '',
         imageType: 'upload',
         sampleImageUrl: '',
-        assignedToEmail: '',
-        assignedToName: '',
+        assignedEditorEmails: [],
+        assignedEditorNames: [],
     });
 
     const [file, setFile] = useState(null);
     const [loading, setLoading] = useState(false);
-
-    /* ---------- SMART COUNTRY AUTOFILL ---------- */
-    const handleWhatsappChange = (e) => {
-        const value = e.target.value;
-
-        let detectedCountry = form.country;
-
-        if (value.startsWith('+')) {
-            const match = countries.find((c) =>
-                value.startsWith(c.code)
-            );
-            if (match) detectedCountry = match.name;
-        }
-
-        setForm({
-            ...form,
-            whatsapp: value,
-            country: detectedCountry,
-        });
-    };
 
     const handleChange = (e) =>
         setForm({ ...form, [e.target.name]: e.target.value });
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setLoading(true);
 
         if (role !== 'team-leader') {
             toast.error('Only team leader can create orders');
-            setLoading(false);
             return;
         }
+
+        if (form.assignedEditorEmails.length === 0) {
+            toast.error('Please assign at least one editor');
+            return;
+        }
+
+        setLoading(true);
 
         try {
             let imageUrl = form.sampleImageUrl;
@@ -132,8 +101,15 @@ const OrderForm = ({ onOrderCreated }) => {
             }
 
             await addDoc(collection(db, 'orders'), {
-                ...form,
+                name: form.name,
+                telecaller: form.telecaller,
+                remark: form.remark,
+                imageType: form.imageType,
                 sampleImageUrl: imageUrl,
+
+                assignedEditorEmails: form.assignedEditorEmails,
+                assignedEditorNames: form.assignedEditorNames,
+
                 status: 'pending',
                 createdAt: serverTimestamp(),
                 completedAt: null,
@@ -142,21 +118,16 @@ const OrderForm = ({ onOrderCreated }) => {
             toast.success('Order created successfully');
             onOrderCreated();
         } catch (err) {
+            console.error(err);
             toast.error(err.message);
         }
+
         setLoading(false);
     };
 
     return (
-        <Container maxWidth="xl">
-            <Paper
-                sx={{
-                    p: { xs: 2, md: 4 },
-                    borderRadius: 4,
-                    background: 'linear-gradient(180deg,#ffffff,#f7f9ff)',
-                    boxShadow: '0 24px 48px rgba(0,0,0,0.08)',
-                }}
-            >
+        <Box sx={{ width: '76vw' }}>
+            <Paper sx={{ p: 4, borderRadius: 4 }}>
                 <Typography variant="h4" fontWeight={700} mb={4}>
                     Create New Order
                 </Typography>
@@ -174,47 +145,6 @@ const OrderForm = ({ onOrderCreated }) => {
                                 required
                             />
 
-                            {/* WhatsApp with auto-detect */}
-                            <GradientTextField
-                                fullWidth
-                                label="WhatsApp Number"
-                                name="whatsapp"
-                                value={form.whatsapp}
-                                onChange={handleWhatsappChange}
-                                required
-                                sx={{ mt: 3 }}
-                                placeholder="+91 98765 43210"
-                                helperText="Country auto-detects from code. You can change it."
-                                InputProps={{
-                                    startAdornment: (
-                                        <InputAdornment position="start">
-                                            <Typography sx={{ color: 'text.secondary', pr: 1 }}>
-
-                                            </Typography>
-                                        </InputAdornment>
-                                    ),
-                                }}
-                            />
-
-                            {/* Country (editable) */}
-                            <Autocomplete
-                                options={countries}
-                                getOptionLabel={(o) => o.name}
-                                value={
-                                    countries.find((c) => c.name === form.country) || null
-                                }
-                                onChange={(e, v) =>
-                                    setForm({ ...form, country: v?.name || '' })
-                                }
-                                renderInput={(params) => (
-                                    <GradientTextField
-                                        {...params}
-                                        label="Country"
-                                        sx={{ mt: 3 }}
-                                    />
-                                )}
-                            />
-
                             <GradientTextField
                                 fullWidth
                                 label="Telecaller"
@@ -223,6 +153,17 @@ const OrderForm = ({ onOrderCreated }) => {
                                 onChange={handleChange}
                                 sx={{ mt: 3 }}
                                 required
+                            />
+
+                            <GradientTextField
+                                fullWidth
+                                label="Remark"
+                                name="remark"
+                                value={form.remark}
+                                onChange={handleChange}
+                                sx={{ mt: 3 }}
+                                multiline
+                                rows={3}
                             />
                         </Grid>
 
@@ -245,11 +186,7 @@ const OrderForm = ({ onOrderCreated }) => {
                                     label={
                                         <Typography>
                                             URL
-                                            <Link
-                                                href="https://imgbb.com/"
-                                                target="_blank"
-                                                sx={{ ml: 0.5, fontSize: 12 }}
-                                            >
+                                            <Link href="https://imgbb.com/" target="_blank" sx={{ ml: 0.5 }}>
                                                 (host here)
                                             </Link>
                                         </Typography>
@@ -263,7 +200,7 @@ const OrderForm = ({ onOrderCreated }) => {
                                     variant="outlined"
                                     startIcon={<UploadFileIcon />}
                                     fullWidth
-                                    sx={{ mt: 2, py: 1.4 }}
+                                    sx={{ mt: 2 }}
                                 >
                                     Upload Image
                                     <VisuallyHiddenInput
@@ -282,20 +219,34 @@ const OrderForm = ({ onOrderCreated }) => {
                                 />
                             )}
 
+                            {/* ASSIGN EDITOR */}
                             <FormControl fullWidth sx={{ mt: 3 }}>
                                 <InputLabel>Assign Editor</InputLabel>
                                 <Select
-                                    value={form.assignedToEmail}
                                     label="Assign Editor"
+                                    value={
+                                        form.assignedEditorEmails.length === editors.length
+                                            ? 'all'
+                                            : form.assignedEditorEmails[0] || ''
+                                    }
                                     onChange={(e) => {
-                                        const ed = editors.find(i => i.email === e.target.value);
-                                        setForm({
-                                            ...form,
-                                            assignedToEmail: ed.email,
-                                            assignedToName: ed.name,
-                                        });
+                                        if (e.target.value === 'all') {
+                                            setForm({
+                                                ...form,
+                                                assignedEditorEmails: editors.map(ed => ed.email),
+                                                assignedEditorNames: editors.map(ed => ed.name),
+                                            });
+                                        } else {
+                                            const ed = editors.find(i => i.email === e.target.value);
+                                            setForm({
+                                                ...form,
+                                                assignedEditorEmails: [ed.email],
+                                                assignedEditorNames: [ed.name],
+                                            });
+                                        }
                                     }}
                                 >
+                                    <MenuItem value="all">All Editors</MenuItem>
                                     {editors.map((e) => (
                                         <MenuItem key={e.email} value={e.email}>
                                             {e.name}
@@ -325,7 +276,7 @@ const OrderForm = ({ onOrderCreated }) => {
                     </Box>
                 </Box>
             </Paper>
-        </Container>
+        </Box>
     );
 };
 

@@ -19,6 +19,7 @@ import {
     CheckCircle as CompletedIcon,
     Download as DownloadIcon,
     Visibility as VisibilityIcon,
+    Lock as LockIcon,
 } from '@mui/icons-material';
 import { toast } from 'react-toastify';
 
@@ -135,7 +136,7 @@ const EditorView = () => {
         if (!window.confirm(confirmMessage)) return;
 
         if (newStatus === 'completed') {
-            const secondConfirm = window.confirm('This action will mark the order as completed and make it uneditable. Are you sure?');
+            const secondConfirm = window.confirm('This action will mark the order as completed. Are you sure?');
             if (!secondConfirm) return;
         }
 
@@ -143,6 +144,8 @@ const EditorView = () => {
             const updateData = { status: newStatus };
             if (newStatus === 'completed') {
                 updateData.completedAt = serverTimestamp();
+            } else {
+                updateData.completedAt = null;
             }
             await updateDoc(doc(db, 'orders', orderId), updateData);
             toast.success(`Status updated to "${newStatus}"`);
@@ -254,6 +257,7 @@ const EditorView = () => {
                                                 variant={order.status === status ? 'contained' : 'text'}
                                                 onClick={() => handleStatusChange(order.id, order.status, status)}
                                                 disabled={order.status === 'completed'}
+                                                startIcon={order.status === 'completed' && status === 'completed' ? <LockIcon /> : null}
                                                 sx={{
                                                     flex: 1,
                                                     minWidth: '100px',

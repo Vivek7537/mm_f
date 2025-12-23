@@ -7,6 +7,7 @@ import { EditorStatsProvider } from './context/EditorStatsContext';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import OrderDetails from './components/OrderDetails';
+import MonthlyOrders from './components/MonthlyOrders';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -85,6 +86,7 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/order/:orderId" element={<ProtectedRoute><OrderDetails /></ProtectedRoute>} />
+            <Route path="/orders/monthly" element={<ProtectedRoute><MonthlyOrders /></ProtectedRoute>} />
             <Route path="/" element={<Navigate to="/dashboard" />} />
           </Routes>
         </Router>

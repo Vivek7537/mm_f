@@ -63,13 +63,13 @@ const OrderDetails = () => {
                             }}
                         />
                     ) : (
-                        <Box sx={{ 
-                            height: 300, 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'center', 
-                            backgroundColor: '#f5f5f5', 
-                            borderRadius: 2 
+                        <Box sx={{
+                            height: 300,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backgroundColor: '#f5f5f5',
+                            borderRadius: 2
                         }}>
                             <Typography color="text.secondary">No Image Found</Typography>
                         </Box>
@@ -103,7 +103,7 @@ const OrderDetails = () => {
                                 <strong>Telecaller:</strong> {order.telecaller}
                             </Typography>
                             <Typography sx={{ mb: 1.5 }} color="text.secondary">
-                                <strong>Assigned To:</strong> {order.assignedToName || 'Unassigned'}
+                                <strong>Assigned To:</strong> {order.assignedEditorNames?.join(', ') || 'Unassigned'}
                             </Typography>
                             <Typography color="text.secondary">
                                 <strong>Created At:</strong> {order.createdAt?.toDate().toLocaleString()}

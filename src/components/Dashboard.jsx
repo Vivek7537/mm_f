@@ -1,8 +1,9 @@
 // src/components/Dashboard.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { signOut } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import {
     AppBar,
@@ -20,6 +21,7 @@ import {
     Avatar,
     CssBaseline,
     Chip,
+    Badge,
 } from '@mui/material';
 import {
     Menu as MenuIcon,
@@ -28,12 +30,14 @@ import {
     List as ListIcon,
     Assessment as AssessmentIcon,
     Logout as LogoutIcon,
+    Build as BuildIcon,
 } from '@mui/icons-material';
 import Analytics from './Analytics';
 import OrderForm from './OrderForm';
 import OrdersList from './OrdersList';
-import EditorView from './EditorView';
+import EditorDashboard from './EditorDashboard';
 import EditorInsights from './EditorInsights';
+
 
 const drawerWidth = 240;
 
@@ -44,6 +48,23 @@ const Dashboard = () => {
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const [mobileOpen, setMobileOpen] = useState(false);
     const [currentView, setCurrentView] = useState(isTeamLeader ? 'analytics' : 'orders');
+    const [pendingCount, setPendingCount] = useState(0);
+
+    useEffect(() => {
+        if (isTeamLeader || !user?.email) return;
+
+        const q = query(
+            collection(db, 'orders'),
+            where('assignedEditorEmails', 'array-contains', user.email),
+            where('status', '==', 'pending')
+        );
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            setPendingCount(snapshot.size);
+        });
+
+        return () => unsubscribe();
+    }, [user, isTeamLeader]);
 
     const handleDrawerToggle = () => {
         setMobileOpen(!mobileOpen);
@@ -59,8 +80,17 @@ const Dashboard = () => {
         { text: 'Orders', icon: <ListIcon />, view: 'orders' },
         { text: 'New Order', icon: <AddIcon />, view: 'create' },
         { text: 'Performance', icon: <AssessmentIcon />, view: 'performance' },
+
     ] : [
-        { text: 'My Tasks', icon: <ListIcon />, view: 'orders' },
+        {
+            text: 'My Tasks',
+            icon: (
+                <Badge badgeContent={pendingCount} color="error">
+                    <ListIcon />
+                </Badge>
+            ),
+            view: 'orders'
+        },
     ];
 
     const renderView = () => {
@@ -70,15 +100,22 @@ const Dashboard = () => {
             case 'create':
                 return <OrderForm onOrderCreated={() => setCurrentView('orders')} />;
             case 'orders':
-                return isTeamLeader ? <OrdersList /> : <EditorView />;
+                return isTeamLeader ? <OrdersList /> : <EditorDashboard />;
             case 'performance':
                 return <EditorInsights />;
+            case 'migration':
+                return <MigrationTool />;
             default:
                 return <div>Select a view</div>;
         }
     };
 
     const currentViewTitle = menuItems.find(item => item.view === currentView)?.text || 'Dashboard';
+
+    const dateOptions = { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' };
+    const currentDate = new Date().toLocaleDateString('en-GB', dateOptions);
+    const displayName = user?.displayName || user?.email?.split('@')[0] || 'User';
+    const formattedName = displayName.charAt(0).toUpperCase() + displayName.slice(1);
 
     const drawer = (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -162,10 +199,19 @@ const Dashboard = () => {
                     >
                         <MenuIcon />
                     </IconButton>
-                    <Typography variant="h5" noWrap component="div" sx={{ flexGrow: 1, fontWeight: 700 }}>
+                    <Typography variant="h5" noWrap component="div" sx={{ fontWeight: 700 }}>
                         {currentViewTitle}
                     </Typography>
+                    <Box sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: { xs: 'none', sm: 'block' } }}>
+                        <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                            {currentDate}
+                        </Typography>
+                    </Box>
+                    <Box sx={{ flexGrow: 1 }} />
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600, display: { xs: 'none', sm: 'block' } }}>
+                            {formattedName}
+                        </Typography>
                         <Chip
                             label={role === 'team-leader' ? 'Team Leader' : 'Editor'}
                             variant="outlined"
