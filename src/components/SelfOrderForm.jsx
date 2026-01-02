@@ -18,10 +18,13 @@ import {
     Paper,
     Grid,
     Link,
-    CircularProgress
+    CircularProgress,
+    IconButton
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import Brightness4Icon from '@mui/icons-material/Brightness4';
+import Brightness7Icon from '@mui/icons-material/Brightness7';
 import { toast } from 'react-toastify';
 
 const GradientTextField = styled(TextField)(() => ({
@@ -58,6 +61,7 @@ const SelfOrderForm = ({ onOrderCreated }) => {
     const [file, setFile] = useState(null);
     const [loading, setLoading] = useState(false);
     const [bbCode, setBbCode] = useState('');
+    const [darkMode, setDarkMode] = useState(false);
 
     const handleChange = (e) =>
         setForm({ ...form, [e.target.name]: e.target.value });
@@ -133,9 +137,14 @@ const SelfOrderForm = ({ onOrderCreated }) => {
                 border: '1px solid rgba(255, 255, 255, 0.4)',
                 boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.15)'
             }}>
-                <Typography variant="h4" fontWeight={700} mb={4}>
-                    Create Self Order
-                </Typography>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+                    <Typography variant="h4" fontWeight={700}>
+                        Create Self Order
+                    </Typography>
+                    <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
+                        {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
+                    </IconButton>
+                </Box>
 
                 <Box component="form" onSubmit={handleSubmit}>
                     <Grid container spacing={3}>

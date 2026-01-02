@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, setDoc, serverTimestamp, where, getDocs, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, setDoc, serverTimestamp, where, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
 import { toast } from 'react-toastify';
 import { db } from '../firebase';
 import UserManagement from './UserManagement';
@@ -158,7 +158,7 @@ const EditOrderDialog = ({ open, onClose, order, editors, onSave, onDelete }) =>
     );
 };
 
-const TeamLeaderDashboard = () => {
+const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
     const { user } = useAuth();
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -189,6 +189,28 @@ const TeamLeaderDashboard = () => {
     const [deleteStep, setDeleteStep] = useState(0);
     const [orderToDelete, setOrderToDelete] = useState(null);
     const [approvalDialog, setApprovalDialog] = useState({ open: false, order: null });
+
+    // Cleanup notifications older than 12 hours
+    useEffect(() => {
+        const cleanupNotifications = async () => {
+            if (!user) return;
+            try {
+                const cutoff = new Date(Date.now() - 12 * 60 * 60 * 1000);
+                const q = query(collection(db, 'notifications'), where('createdAt', '<=', cutoff));
+                const snapshot = await getDocs(q);
+
+                if (!snapshot.empty) {
+                    const batch = writeBatch(db);
+                    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+                    await batch.commit();
+                    console.log(`Cleaned up ${snapshot.size} old notifications.`);
+                }
+            } catch (error) {
+                console.error("Error cleaning up notifications:", error);
+            }
+        };
+        cleanupNotifications();
+    }, [user]);
 
     useEffect(() => {
         // Fetch all orders ordered by creation date
@@ -228,6 +250,17 @@ const TeamLeaderDashboard = () => {
             unsubscribeUsers();
         };
     }, []);
+
+    useEffect(() => {
+        if (highlightOrderId && orders.length > 0) {
+            const order = orders.find(o => o.id === highlightOrderId);
+            if (order) {
+                setSelectedOrder(order);
+                setDetailsOpen(true);
+                if (onClearHighlight) onClearHighlight();
+            }
+        }
+    }, [highlightOrderId, orders, onClearHighlight]);
 
     const handleRateOrder = async (order, newValue) => {
         try {
@@ -568,6 +601,14 @@ const TeamLeaderDashboard = () => {
                     }
                 }
             });
+
+            const totalOrders = filteredOrders.length;
+            const completedCount = filteredOrders.filter(o => o.status === 'completed').length;
+            const pendingCount = filteredOrders.filter(o => o.status === 'pending').length;
+            const inProgressCount = filteredOrders.filter(o => o.status === 'in-progress').length;
+
+            const finalY = doc.lastAutoTable.finalY || 30;
+            doc.text(`Summary: Total: ${totalOrders} | Completed: ${completedCount} | Pending: ${pendingCount} | In-Progress: ${inProgressCount}`, 14, finalY + 10);
 
             doc.text("Orders Report", 14, 15);
             doc.save(`orders_report_${new Date().toISOString().split('T')[0]}.pdf`);

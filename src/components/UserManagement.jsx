@@ -30,7 +30,8 @@ import {
     DialogContentText,
     useTheme,
     useMediaQuery,
-    Rating
+    Rating,
+    Switch
 } from '@mui/material';
 import { Edit as EditIcon, ArrowBack as ArrowBackIcon, Add as AddIcon, Delete as DeleteIcon, AdminPanelSettings as AdminIcon } from '@mui/icons-material';
 import { toast } from 'react-toastify';
@@ -126,6 +127,19 @@ const UserManagement = ({ onBack }) => {
         setDetailsOpen(true);
     };
 
+    const handleToggleStats = async (userId, currentStatus) => {
+        try {
+            const userRef = doc(db, 'users', userId);
+            await updateDoc(userRef, {
+                allowSeeStats: !currentStatus
+            });
+            toast.success("Permissions updated");
+        } catch (error) {
+            console.error("Error updating stats permission:", error);
+            toast.error("Failed to update permission");
+        }
+    };
+
     if (loading) return <Box display="flex" justifyContent="center" p={5}><CircularProgress /></Box>;
 
     return (
@@ -157,6 +171,7 @@ const UserManagement = ({ onBack }) => {
                             <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}><strong>Joined Date</strong></TableCell>
                             <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}><strong>Performance</strong></TableCell>
                             <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}><strong>Role</strong></TableCell>
+                            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}><strong>Stats Access</strong></TableCell>
                             <TableCell align="right" sx={{ width: { xs: 80, sm: 'auto' }, px: { xs: 1, sm: 2 } }}><strong>Actions</strong></TableCell>
                         </TableRow>
                     </TableHead>
@@ -198,6 +213,16 @@ const UserManagement = ({ onBack }) => {
                                         color={user.role === 'team-leader' ? 'secondary' : 'default'}
                                         size="small"
                                     />
+                                </TableCell>
+                                <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+                                    <Tooltip title="Allow editor to see their lifetime stats">
+                                        <Switch
+                                            checked={user.allowSeeStats === true}
+                                            onChange={() => handleToggleStats(user.id, user.allowSeeStats)}
+                                            color="primary"
+                                            size="small"
+                                        />
+                                    </Tooltip>
                                 </TableCell>
                                 <TableCell align="right" sx={{ px: { xs: 1, sm: 2 } }}>
                                     <Tooltip title="Edit User">

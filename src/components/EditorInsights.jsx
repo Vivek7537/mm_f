@@ -34,6 +34,8 @@ import {
     Timeline as TimelineIcon,
     Refresh as RefreshIcon,
     Group as GroupIcon,
+    Brightness4,
+    Brightness7,
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { useAuth } from '../context/AuthContext';
@@ -47,6 +49,7 @@ const EditorInsights = () => {
     const { editorStats, loading, refreshStats } = useEditorStats();
     const { orders: allOrders, loading: ordersLoading } = useOrders();
     const [selectedEditorEmail, setSelectedEditorEmail] = useState(null);
+    const [darkMode, setDarkMode] = useState(false);
 
     const enrichedEditorStats = useMemo(() => {
         if (!editorStats || !allOrders) return [];
@@ -189,9 +192,14 @@ const EditorInsights = () => {
     return (
         <Box sx={{ p: { xs: 2, md: 3 } }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                <Typography variant="h4" component="h1" gutterBottom sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' } }}>
-                    Editor Insights
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Typography variant="h4" component="h1" gutterBottom sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' }, mb: 0 }}>
+                        Editor Insights
+                    </Typography>
+                    <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
+                        {darkMode ? <Brightness7 /> : <Brightness4 />}
+                    </IconButton>
+                </Box>
                 <Tooltip title="Refresh Data">
                     <IconButton color="default">
                         <RefreshIcon />

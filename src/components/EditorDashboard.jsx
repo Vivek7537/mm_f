@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp, arrayUnion, arrayRemove, getDoc, getDocs, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
@@ -32,9 +32,11 @@ import {
     TextField,
     InputAdornment,
     Alert,
-    Avatar
+    Avatar,
+    LinearProgress
 } from '@mui/material';
 import { Lock as LockIcon, Close as CloseIcon, CheckCircle as CheckCircleIcon, Search as SearchIcon, WarningAmber as WarningIcon } from '@mui/icons-material';
+import EditorStats from './EditorStats';
 
 const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
     const { user } = useAuth();
@@ -47,6 +49,7 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
+    const [mainTab, setMainTab] = useState('tasks');
 
     // State for confirmation dialog
     const [confirmOpen, setConfirmOpen] = useState(false);
@@ -58,7 +61,25 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
     const [selectedOrder, setSelectedOrder] = useState(null);
     const [messages, setMessages] = useState({}); // { orderId: 'message' }
     const [sending, setSending] = useState({}); // { orderId: boolean }
+    const [canSeeStats, setCanSeeStats] = useState(false);
     const isInitialMount = useRef(true);
+
+    // Listen for user permissions (allowSeeStats)
+    useEffect(() => {
+        if (!user?.uid) return;
+
+        const userDocRef = doc(db, 'users', user.uid);
+        const unsubscribe = onSnapshot(userDocRef, (docSnapshot) => {
+            if (docSnapshot.exists()) {
+                const userData = docSnapshot.data();
+                setCanSeeStats(userData.allowSeeStats === true);
+            }
+        }, (error) => {
+            console.error("Error fetching user permissions:", error);
+        });
+
+        return () => unsubscribe();
+    }, [user]);
 
     useEffect(() => {
         if (!user?.email) return;
@@ -88,15 +109,18 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
                 ...doc.data(),
             }));
 
+            // Deduplicate orders to prevent "same key" warnings in React
+            const uniqueOrders = Array.from(new Map(fetchedOrders.map(item => [item.id, item])).values());
+
             // Sort by createdAt descending (newest first)
             // Doing this client-side avoids complex Firestore composite index requirements
-            fetchedOrders.sort((a, b) => {
+            uniqueOrders.sort((a, b) => {
                 const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
                 const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
                 return dateB - dateA;
             });
 
-            setOrders(fetchedOrders);
+            setOrders(uniqueOrders);
             setLoading(false);
             isInitialMount.current = false;
         }, (error) => {
@@ -337,6 +361,7 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
         }
     };
 
+
     if (loading) {
         return (
             <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
@@ -346,11 +371,11 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
     }
 
     return (
-        <Container maxWidth="lg" sx={{ mt: 4, mb: 4, width: '75vw' }}>
+        <Container maxWidth="lg" sx={{ mt: -2, mb: 4, width: '75vw' }}>
             <Box display="flex" alignItems="center" gap={2} mb={4}>
-                <Typography variant="h4" fontWeight={700}>
+                {/* <Typography variant="h4" fontWeight={700}>
                     My Tasks
-                </Typography>
+                </Typography> */}
                 {user?.displayName && (
                     <Typography variant="h5" color="text.secondary" fontWeight={500}>
                         - {user.displayName}
@@ -358,133 +383,146 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
                 )}
             </Box>
 
-            <Box mb={4} sx={{ display: 'flex', justifyContent: { xs: 'center', sm: 'flex-start' } }}>
-                <ToggleButtonGroup
-                    color="primary"
-                    value={filter}
-                    exclusive
-                    onChange={(e, newFilter) => {
-                        if (newFilter !== null) setFilter(newFilter);
-                    }}
-                    aria-label="Order Status Filter"
-                >
-                    <ToggleButton value="pending">Pending</ToggleButton>
-                    <ToggleButton value="active">Active</ToggleButton>
-                    <ToggleButton value="completed">Completed</ToggleButton>
-                </ToggleButtonGroup>
-            </Box>
-
-            <Box sx={{ mb: 3, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, flexWrap: 'wrap' }}>
-                <TextField
-                    label="Search by Client or Telecaller"
-                    variant="outlined"
-                    size="small"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    InputProps={{
-                        startAdornment: (
-                            <InputAdornment position="start">
-                                <SearchIcon color="action" />
-                            </InputAdornment>
-                        ),
-                    }}
-                    sx={{ flexGrow: 1, width: { xs: '100%', sm: 'auto' }, bgcolor: 'background.paper', borderRadius: 1 }}
-                />
-                <TextField
-                    label="Start Date"
-                    type="date"
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                    value={startDate}
-                    onChange={(e) => {
-                        setStartDate(e.target.value);
-                        setTimeFilter('custom');
-                    }}
-                    sx={{ width: { xs: '100%', sm: 'auto' }, bgcolor: 'background.paper', borderRadius: 1 }}
-                />
-                <TextField
-                    label="End Date"
-                    type="date"
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                    value={endDate}
-                    onChange={(e) => {
-                        setEndDate(e.target.value);
-                        setTimeFilter('custom');
-                    }}
-                    sx={{ width: { xs: '100%', sm: 'auto' }, bgcolor: 'background.paper', borderRadius: 1 }}
-                />
-            </Box>
-
             <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-                <Tabs
-                    value={timeFilter}
-                    onChange={(e, v) => {
-                        setTimeFilter(v);
-                        setStartDate('');
-                        setEndDate('');
-                    }}
-                    variant="scrollable"
-                    scrollButtons="auto"
-                >
-                    <Tab label="All Orders" value="all" />
-                    <Tab label="3+ Days Old" value="3_days_old" />
-                    <Tab label="30+ Days Old" value="30_days_old" />
+                <Tabs value={mainTab} onChange={(e, v) => setMainTab(v)}>
+                    <Tab label="My Tasks" value="tasks" />
+                    {canSeeStats && <Tab label="Statistics" value="stats" />}
                 </Tabs>
             </Box>
 
-            {filteredOrders.length === 0 ? (
-                <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 4 }}>
-                    <Alert severity="info" sx={{ justifyContent: 'center' }}>
-                        {orders.length === 0 ? "No orders assigned to you yet." : `No orders match the current filters.`}
-                    </Alert>
-                </Paper>
-            ) : (
-                <Grid container spacing={2}>
-                    {filteredOrders.map((order) => {
-                        const now = new Date();
-                        const orderDate = order.createdAt?.toDate ? order.createdAt.toDate() : null;
-                        let diffDays = 0;
-                        if (orderDate) {
-                            const diffTime = Math.abs(now - orderDate);
-                            diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                        }
+            {mainTab === 'stats' && canSeeStats && (
+                <EditorStats orders={orders} userEmail={user?.email} />
+            )}
 
-                        const isOverdue30 = diffDays >= 30 && order.status !== 'completed';
-                        const isOverdue3 = diffDays >= 3 && diffDays < 30 && order.status !== 'completed';
-                        const isOverdue = isOverdue3 || isOverdue30;
-                        const overdueText = isOverdue30 ? '30+ Days' : '3+ Days';
+            {mainTab === 'tasks' && (
+                <>
+                    <Box mb={4} sx={{ display: 'flex', justifyContent: { xs: 'center', sm: 'flex-start' } }}>
+                        <ToggleButtonGroup
+                            color="primary"
+                            value={filter}
+                            exclusive
+                            onChange={(e, newFilter) => {
+                                if (newFilter !== null) setFilter(newFilter);
+                            }}
+                            aria-label="Order Status Filter"
+                        >
+                            <ToggleButton value="pending">Pending</ToggleButton>
+                            <ToggleButton value="active">Active</ToggleButton>
+                            <ToggleButton value="completed">Completed</ToggleButton>
+                        </ToggleButtonGroup>
+                    </Box>
 
-                        return (
-                            <Grid item xl={6} sm={6} md={4} lg={3} key={order.id}>
-                                <Paper
-                                    sx={{
-                                        p: { xs: 1.5, sm: 2 },
-                                        borderRadius: 3,
-                                        boxShadow: '0 10px 30px rgba(0,0,0,0.05)',
-                                        height: '100%',
-                                        minHeight: 360,
-                                        width: '220px',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        justifyContent: 'space-between', // Distribute space
-                                        transition: 'transform 0.2s',
-                                        bgcolor: getEditorStatus(order) === 'completed' ? '#e8f5e9' : (isOverdue ? (isOverdue30 ? '#ffebee' : '#fff8e1') : 'background.paper'),
-                                        border: getEditorStatus(order) === 'completed' ? '2px solid #4caf50' : (isOverdue ? `2px solid ${isOverdue30 ? '#d32f2f' : '#ed6c02'}` : 'none'),
-                                        '&:hover': {
-                                            transform: 'translateY(-4px)',
-                                        },
-                                    }}
-                                >
-                                    {isOverdue && (
-                                        <Box sx={{ mb: 2, p: 1, borderRadius: 1, bgcolor: isOverdue30 ? 'error.lighter' : 'warning.lighter' }}>
-                                            <Box display="flex" alignItems="center" mb={1}>
-                                                <WarningIcon color={isOverdue30 ? 'error' : 'warning'} sx={{ mr: 1 }} />
-                                                <Typography variant="subtitle2" color={isOverdue30 ? 'error.main' : 'warning.main'} sx={{ textTransform: 'capitalize' }}>
-                                                    This order is {order.status} for over {overdueText}!
-                                                </Typography>
-                                            </Box>
-                                            <Box display="flex" gap={1}>
+                    <Box sx={{ mb: 3, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, flexWrap: 'wrap' }}>
+                        <TextField
+                            label="Search by Client or Telecaller"
+                            variant="outlined"
+                            size="small"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            InputProps={{
+                                startAdornment: (
+                                    <InputAdornment position="start">
+                                        <SearchIcon color="action" />
+                                    </InputAdornment>
+                                ),
+                            }}
+                            sx={{ flexGrow: 1, width: { xs: '100%', sm: 'auto' }, bgcolor: 'background.paper', borderRadius: 1 }}
+                        />
+                        <TextField
+                            label="Start Date"
+                            type="date"
+                            size="small"
+                            InputLabelProps={{ shrink: true }}
+                            value={startDate}
+                            onChange={(e) => {
+                                setStartDate(e.target.value);
+                                setTimeFilter('custom');
+                            }}
+                            sx={{ width: { xs: '100%', sm: 'auto' }, bgcolor: 'background.paper', borderRadius: 1 }}
+                        />
+                        <TextField
+                            label="End Date"
+                            type="date"
+                            size="small"
+                            InputLabelProps={{ shrink: true }}
+                            value={endDate}
+                            onChange={(e) => {
+                                setEndDate(e.target.value);
+                                setTimeFilter('custom');
+                            }}
+                            sx={{ width: { xs: '100%', sm: 'auto' }, bgcolor: 'background.paper', borderRadius: 1 }}
+                        />
+                    </Box>
+
+                    <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+                        <Tabs
+                            value={timeFilter}
+                            onChange={(e, v) => {
+                                setTimeFilter(v);
+                                setStartDate('');
+                                setEndDate('');
+                            }}
+                            variant="scrollable"
+                            scrollButtons="auto"
+                        >
+                            <Tab label="All Orders" value="all" />
+                            <Tab label="3+ Days Old" value="3_days_old" />
+                            <Tab label="30+ Days Old" value="30_days_old" />
+                        </Tabs>
+                    </Box>
+
+                    {filteredOrders.length === 0 ? (
+                        <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 4 }}>
+                            <Alert severity="info" sx={{ justifyContent: 'center' }}>
+                                {orders.length === 0 ? "No orders assigned to you yet." : `No orders match the current filters.`}
+                            </Alert>
+                        </Paper>
+                    ) : (
+                        <Grid container spacing={2}>
+                            {filteredOrders.map((order) => {
+                                const now = new Date();
+                                const orderDate = order.createdAt?.toDate ? order.createdAt.toDate() : null;
+                                let diffDays = 0;
+                                if (orderDate) {
+                                    const diffTime = Math.abs(now - orderDate);
+                                    diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                                }
+
+                                const isOverdue30 = diffDays >= 30 && order.status !== 'completed';
+                                const isOverdue3 = diffDays >= 3 && diffDays < 30 && order.status !== 'completed';
+                                const isOverdue = isOverdue3 || isOverdue30;
+                                const overdueText = isOverdue30 ? '30+ Days' : '3+ Days';
+
+                                return (
+                                    <Grid item xl={6} sm={6} md={4} lg={3} key={order.id}>
+                                        <Paper
+                                            sx={{
+                                                p: { xs: 1.5, sm: 2 },
+                                                borderRadius: 3,
+                                                boxShadow: '0 10px 30px rgba(0,0,0,0.05)',
+                                                height: '100%',
+                                                minHeight: 360,
+                                                width: '220px',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                justifyContent: 'space-between', // Distribute space
+                                                transition: 'transform 0.2s',
+                                                bgcolor: getEditorStatus(order) === 'completed' ? '#e8f5e9' : (isOverdue ? (isOverdue30 ? '#ffebee' : '#fff8e1') : 'background.paper'),
+                                                border: getEditorStatus(order) === 'completed' ? '2px solid #4caf50' : (isOverdue ? `2px solid ${isOverdue30 ? '#d32f2f' : '#ed6c02'}` : 'none'),
+                                                '&:hover': {
+                                                    transform: 'translateY(-4px)',
+                                                },
+                                            }}
+                                        >
+                                            {isOverdue && (
+                                                <Box sx={{ mb: 2, p: 1, borderRadius: 1, bgcolor: isOverdue30 ? 'error.lighter' : 'warning.lighter' }}>
+                                                    <Box display="flex" alignItems="center" mb={1}>
+                                                        <WarningIcon color={isOverdue30 ? 'error' : 'warning'} sx={{ mr: 1 }} />
+                                                        <Typography variant="subtitle2" color={isOverdue30 ? 'error.main' : 'warning.main'} sx={{ textTransform: 'capitalize' }}>
+                                                            This order is {order.status} for over {overdueText}!
+                                                        </Typography>
+                                                    </Box>
+                                                    {/* <Box display="flex" gap={1}>
                                                 <TextField
                                                     label="Message to Team Leader"
                                                     variant="outlined"
@@ -503,189 +541,191 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
                                                 >
                                                     {sending[order.id] ? <CircularProgress size={20} /> : 'Send Alert'}
                                                 </Button>
-                                            </Box>
-                                        </Box>
-                                    )}
+                                            </Box> */}
+                                                </Box>
+                                            )}
 
-                                    <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-                                        {isBroadcast(order) ? (
-                                            <Chip
-                                                label="New Order Available"
-                                                color="primary"
-                                                size="small"
-                                                sx={{ fontWeight: 'bold' }}
-                                            />
-                                        ) : (
-                                            <Box>
-                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                                    <Tooltip title={order.status === 'pending' && !order.isSelfOrder ? "Please accept the order first" : ""} arrow>
-                                                        <Box>
-                                                            <FormControl size="small" sx={{ minWidth: 140 }}>
-                                                                <InputLabel id={`status-label-${order.id}`}>Status</InputLabel>
-                                                                <Select
-                                                                    labelId={`status-label-${order.id}`}
-                                                                    value={getEditorStatus(order)}
-                                                                    label="Status"
-                                                                    onChange={(e) => handleStatusChange(order.id, e.target.value)}
-                                                                    sx={{ bgcolor: 'background.paper' }}
-                                                                    disabled={getEditorStatus(order) === 'completed' || (order.status === 'pending' && !order.isSelfOrder)}
-                                                                >
-                                                                    <MenuItem value="pending" disabled>Pending</MenuItem>
-                                                                    <MenuItem value="in-progress">In-Progress</MenuItem>
-                                                                    <MenuItem value="completed">Completed</MenuItem>
-                                                                </Select>
-                                                            </FormControl>
+                                            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+                                                {isBroadcast(order) ? (
+                                                    <Chip
+                                                        label="New Order Available"
+                                                        color="primary"
+                                                        size="small"
+                                                        sx={{ fontWeight: 'bold' }}
+                                                    />
+                                                ) : (
+                                                    <Box>
+                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                            <Tooltip title={order.status === 'pending' && !order.isSelfOrder ? "Please accept the order first" : ""} arrow>
+                                                                <Box>
+                                                                    <FormControl size="small" sx={{ minWidth: 140 }}>
+                                                                        <InputLabel id={`status-label-${order.id}`}>Status</InputLabel>
+                                                                        <Select
+                                                                            labelId={`status-label-${order.id}`}
+                                                                            value={getEditorStatus(order)}
+                                                                            label="Status"
+                                                                            onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                                                                            sx={{ bgcolor: 'background.paper' }}
+                                                                            disabled={getEditorStatus(order) === 'completed' || (order.status === 'pending' && !order.isSelfOrder)}
+                                                                        >
+                                                                            <MenuItem value="pending" disabled>Pending</MenuItem>
+                                                                            <MenuItem value="in-progress">In-Progress</MenuItem>
+                                                                            <MenuItem value="completed">Completed</MenuItem>
+                                                                        </Select>
+                                                                    </FormControl>
+                                                                </Box>
+                                                            </Tooltip>
+                                                            {getEditorStatus(order) === 'completed' && (
+                                                                <Tooltip title="Status is locked">
+                                                                    <LockIcon color="action" fontSize="small" />
+                                                                </Tooltip>
+                                                            )}
                                                         </Box>
-                                                    </Tooltip>
-                                                    {getEditorStatus(order) === 'completed' && (
-                                                        <Tooltip title="Status is locked">
-                                                            <LockIcon color="action" fontSize="small" />
-                                                        </Tooltip>
+                                                        {getEditorStatus(order) === 'completed' && order.status !== 'completed' && (
+                                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, fontStyle: 'italic' }}>
+                                                                Waiting for others
+                                                            </Typography>
+                                                        )}
+                                                    </Box>
+                                                )}
+                                                <Box display="flex" gap={0.5}>
+                                                    {order.priority && order.priority !== 'normal' && (
+                                                        <Chip
+                                                            label={order.priority.toUpperCase()}
+                                                            size="small"
+                                                            color={getPriorityColor(order.priority)}
+                                                            sx={{ fontSize: '0.7rem', height: 24, fontWeight: 'bold' }}
+                                                        />
+                                                    )}
+                                                    {order.assignedEditorEmails?.length > 1 && !isBroadcast(order) && (
+                                                        <Chip
+                                                            label="SHARED"
+                                                            size="small"
+                                                            variant="outlined"
+                                                            sx={{
+                                                                fontSize: '0.7rem',
+                                                                height: 24,
+                                                                color: '#9C27B0',
+                                                                borderColor: '#9C27B0'
+                                                            }}
+                                                        />
                                                     )}
                                                 </Box>
-                                                {getEditorStatus(order) === 'completed' && order.status !== 'completed' && (
-                                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, fontStyle: 'italic' }}>
-                                                        Waiting for others
-                                                    </Typography>
-                                                )}
                                             </Box>
-                                        )}
-                                        <Box display="flex" gap={0.5}>
-                                            {order.priority && order.priority !== 'normal' && (
-                                                <Chip
-                                                    label={order.priority.toUpperCase()}
-                                                    size="small"
-                                                    color={getPriorityColor(order.priority)}
-                                                    sx={{ fontSize: '0.7rem', height: 24, fontWeight: 'bold' }}
-                                                />
-                                            )}
-                                            {order.assignedEditorEmails?.length > 1 && !isBroadcast(order) && (
-                                                <Chip
-                                                    label="SHARED"
-                                                    size="small"
-                                                    variant="outlined"
+
+                                            {/* Image Container with Fixed Height */}
+                                            <Box
+                                                sx={{
+                                                    width: { xs: '100%', sm: 180 },
+                                                    height: { xs: 100, sm: 120 },
+                                                    mb: 1,
+                                                    borderRadius: 2,
+                                                    overflow: 'hidden',
+                                                    bgcolor: '#f5f5f5',
+                                                    flexShrink: 0,
+                                                    '&:hover img': {
+                                                        objectFit: 'contain', // Show full image on hover
+                                                        transform: 'scale(1.05)'
+                                                    }
+                                                }}
+                                            >
+                                                <Box
+                                                    component="img"
+                                                    src={order.sampleImageUrl || 'No Image Available'}
+                                                    alt="Order Sample"
                                                     sx={{
-                                                        fontSize: '0.7rem',
-                                                        height: 24,
-                                                        color: '#9C27B0',
-                                                        borderColor: '#9C27B0'
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        objectFit: 'cover', // Fix overflow/cropping
+                                                        transition: 'all 0.3s ease'
                                                     }}
                                                 />
-                                            )}
-                                        </Box>
-                                    </Box>
+                                            </Box>
 
-                                    {/* Image Container with Fixed Height */}
-                                    <Box
-                                        sx={{
-                                            width: { xs: '100%', sm: 180 },
-                                            height: { xs: 100, sm: 120 },
-                                            mb: 1,
-                                            borderRadius: 2,
-                                            overflow: 'hidden',
-                                            bgcolor: '#f5f5f5',
-                                            flexShrink: 0,
-                                            '&:hover img': {
-                                                objectFit: 'contain', // Show full image on hover
-                                                transform: 'scale(1.05)'
-                                            }
-                                        }}
-                                    >
-                                        <Box
-                                            component="img"
-                                            src={order.sampleImageUrl || 'No Image Available'}
-                                            alt="Order Sample"
-                                            sx={{
-                                                width: '100%',
-                                                height: '100%',
-                                                objectFit: 'cover', // Fix overflow/cropping
-                                                transition: 'all 0.3s ease'
-                                            }}
-                                        />
-                                    </Box>
-
-                                    {/* Content Area */}
-                                    <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
-                                        <Typography variant="subtitle1" fontWeight={700} gutterBottom sx={{
-                                            fontSize: { xs: '0.9rem', sm: '1rem' },
-                                            display: '-webkit-box',
-                                            WebkitLineClamp: 1,
-                                            WebkitBoxOrient: 'vertical',
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis'
-                                        }}>
-                                            {order.name}
-                                        </Typography>
-
-                                        <Typography variant="caption" color="text.secondary" mb={0.5} display="block" sx={{
-                                            whiteSpace: 'nowrap',
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis'
-                                        }}>
-                                            <strong>Telecaller:</strong> {order.telecaller}
-                                        </Typography>
-
-                                        <Typography variant="caption" color="text.secondary" mb={1} display="block">
-                                            Date: {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}
-                                        </Typography>
-
-                                        {/* Remark Section */}
-                                        <Box sx={{ mb: 1.5, overflow: 'hidden', width: '100%' }}>
-                                            {order.remark && (
-                                                <Typography variant="caption" sx={{
-                                                    fontStyle: 'italic',
-                                                    color: 'text.secondary',
+                                            {/* Content Area */}
+                                            <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+                                                <Typography variant="subtitle1" fontWeight={700} gutterBottom sx={{
+                                                    fontSize: { xs: '0.9rem', sm: '1rem' },
                                                     display: '-webkit-box',
-                                                    WebkitLineClamp: 2,
+                                                    WebkitLineClamp: 1,
                                                     WebkitBoxOrient: 'vertical',
                                                     overflow: 'hidden',
-                                                    textOverflow: 'ellipsis',
-                                                    bgcolor: '#fff8e1',
-                                                    p: 0.5,
-                                                    borderRadius: 1,
+                                                    textOverflow: 'ellipsis'
                                                 }}>
-                                                    Remark: {order.remark}
+                                                    {order.name}
                                                 </Typography>
-                                            )}
-                                        </Box>
-                                    </Box>
 
-                                    {order.status === 'pending' && !order.isSelfOrder ? (
-                                        <Button
-                                            variant="contained"
-                                            fullWidth
-                                            color="success"
-                                            startIcon={<CheckCircleIcon />}
-                                            onClick={() => handleAcceptOrder(order)}
-                                            sx={{
-                                                mt: 'auto',
-                                                fontSize: '0.75rem',
-                                                fontWeight: 600,
-                                                boxShadow: '0 4px 14px 0 rgba(76, 175, 80, 0.39)'
-                                            }}
-                                        >
-                                            Accept Order
-                                        </Button>
-                                    ) : (
-                                        <Button
-                                            variant="contained"
-                                            fullWidth
-                                            onClick={() => handleOpenDetails(order)}
-                                            sx={{
-                                                mt: 'auto', // Ensures button stays at bottom
-                                                background: 'linear-gradient(135deg,#667eea,#764ba2)',
-                                                fontSize: '0.75rem',
-                                                textTransform: 'none',
-                                                fontWeight: 600,
-                                            }}
-                                        >
-                                            View Details
-                                        </Button>
-                                    )}
-                                </Paper>
-                            </Grid>)
-                    })}
-                </Grid>
+                                                <Typography variant="caption" color="text.secondary" mb={0.5} display="block" sx={{
+                                                    whiteSpace: 'nowrap',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis'
+                                                }}>
+                                                    <strong>Telecaller:</strong> {order.telecaller}
+                                                </Typography>
+
+                                                <Typography variant="caption" color="text.secondary" mb={1} display="block">
+                                                    Date: {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'}
+                                                </Typography>
+
+                                                {/* Remark Section */}
+                                                <Box sx={{ mb: 1.5, overflow: 'hidden', width: '100%' }}>
+                                                    {order.remark && (
+                                                        <Typography variant="caption" sx={{
+                                                            fontStyle: 'italic',
+                                                            color: 'text.secondary',
+                                                            display: '-webkit-box',
+                                                            WebkitLineClamp: 2,
+                                                            WebkitBoxOrient: 'vertical',
+                                                            overflow: 'hidden',
+                                                            textOverflow: 'ellipsis',
+                                                            bgcolor: '#fff8e1',
+                                                            p: 0.5,
+                                                            borderRadius: 1,
+                                                        }}>
+                                                            Remark: {order.remark}
+                                                        </Typography>
+                                                    )}
+                                                </Box>
+                                            </Box>
+
+                                            {order.status === 'pending' && !order.isSelfOrder ? (
+                                                <Button
+                                                    variant="contained"
+                                                    fullWidth
+                                                    color="success"
+                                                    startIcon={<CheckCircleIcon />}
+                                                    onClick={() => handleAcceptOrder(order)}
+                                                    sx={{
+                                                        mt: 'auto',
+                                                        fontSize: '0.75rem',
+                                                        fontWeight: 600,
+                                                        boxShadow: '0 4px 14px 0 rgba(76, 175, 80, 0.39)'
+                                                    }}
+                                                >
+                                                    Accept Order
+                                                </Button>
+                                            ) : (
+                                                <Button
+                                                    variant="contained"
+                                                    fullWidth
+                                                    onClick={() => handleOpenDetails(order)}
+                                                    sx={{
+                                                        mt: 'auto', // Ensures button stays at bottom
+                                                        background: 'linear-gradient(135deg,#667eea,#764ba2)',
+                                                        fontSize: '0.75rem',
+                                                        textTransform: 'none',
+                                                        fontWeight: 600,
+                                                    }}
+                                                >
+                                                    View Details
+                                                </Button>
+                                            )}
+                                        </Paper>
+                                    </Grid>)
+                            })}
+                        </Grid>
+                    )}
+                </>
             )}
 
             {/* Confirmation Dialog */}

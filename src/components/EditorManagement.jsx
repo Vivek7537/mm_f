@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     Box,
     Typography,
@@ -25,17 +25,21 @@ import {
     Rating,
     Tooltip
 } from '@mui/material';
-import { Block as BlockIcon, CheckCircle as CheckCircleIcon, People, PersonOff, Star, TrendingUp, NewReleases, VerifiedUser as VerifiedUserIcon } from '@mui/icons-material';
+import {
+    Block as BlockIcon, CheckCircle as CheckCircleIcon, People, PersonOff, Star, TrendingUp, NewReleases, VerifiedUser as VerifiedUserIcon,
+    Brightness4, Brightness7
+} from '@mui/icons-material';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { toast } from 'react-toastify';
+import { useOrders } from '../hooks/useOrders';
 
 const EditorManagement = () => {
+    const { orders } = useOrders();
     const [editors, setEditors] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [pendingOrders, setPendingOrders] = useState({});
-    const [completedOrders, setCompletedOrders] = useState({});
     const [confirmDialog, setConfirmDialog] = useState({ open: false, editorId: null, editorName: '', action: 'terminate' });
+    const [darkMode, setDarkMode] = useState(false);
 
     useEffect(() => {
         const qUsers = query(collection(db, 'users'), where('role', '==', 'editor'));
@@ -53,34 +57,31 @@ const EditorManagement = () => {
             setLoading(false);
         });
 
-        // Fetch pending orders to show active workload details
-        const qOrders = query(collection(db, 'orders'));
-        const unsubOrders = onSnapshot(qOrders, (snapshot) => {
-            const pCounts = {};
-            const cCounts = {};
-            snapshot.docs.forEach(doc => {
-                const data = doc.data();
-                if (data.assignedEditorEmails && Array.isArray(data.assignedEditorEmails)) {
-                    data.assignedEditorEmails.forEach(email => {
-                        const isCompletedByEditor = data.status === 'completed' || (data.completedBy && data.completedBy.includes(email));
+        return () => {
+            unsubUsers();
+        };
+    }, []);
+
+    const { pendingOrders, completedOrders } = useMemo(() => {
+        const pCounts = {};
+        const cCounts = {};
+        if (orders) {
+            orders.forEach(order => {
+                if (order.assignedEditorEmails && Array.isArray(order.assignedEditorEmails)) {
+                    order.assignedEditorEmails.forEach(email => {
+                        const isCompletedByEditor = order.status === 'completed' || (order.completedBy && order.completedBy.includes(email));
 
                         if (isCompletedByEditor) {
                             cCounts[email] = (cCounts[email] || 0) + 1;
-                        } else if (data.status === 'pending' || data.status === 'in-progress') {
+                        } else if (order.status === 'pending' || order.status === 'in-progress') {
                             pCounts[email] = (pCounts[email] || 0) + 1;
                         }
                     });
                 }
             });
-            setPendingOrders(pCounts);
-            setCompletedOrders(cCounts);
-        });
-
-        return () => {
-            unsubUsers();
-            unsubOrders();
-        };
-    }, []);
+        }
+        return { pendingOrders: pCounts, completedOrders: cCounts };
+    }, [orders]);
 
 
     const handleStatusToggle = (editor) => {
@@ -158,10 +159,15 @@ const EditorManagement = () => {
 
     return (
         <Box sx={{ p: { xs: 2, md: 3 } }}>
-            <Typography variant="h5" gutterBottom>Editor Insights & Management</Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h5" gutterBottom sx={{ mb: 0 }}>Editor Insights & Management</Typography>
+                <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
+                    {darkMode ? <Brightness7 /> : <Brightness4 />}
+                </IconButton>
+            </Box >
 
             {/* Analytics Dashboard Section */}
-            <Grid container spacing={{ xs: 2, md: 3 }} sx={{ mb: 4 }}>
+            < Grid container spacing={{ xs: 2, md: 3 }} sx={{ mb: 4 }}>
                 <Grid item xs={12} sm={6} md={4}>
                     <Card>
                         <CardContent>
@@ -227,7 +233,7 @@ const EditorManagement = () => {
                         </CardContent>
                     </Card>
                 </Grid>
-            </Grid>
+            </Grid >
 
             <TableContainer component={Paper} sx={{ width: '100%' }}>
                 <Table size="small">
@@ -337,7 +343,7 @@ const EditorManagement = () => {
                     </Button>
                 </DialogActions>
             </Dialog>
-        </Box>
+        </Box >
     );
 };
 

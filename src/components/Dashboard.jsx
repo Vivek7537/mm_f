@@ -45,6 +45,8 @@ import TeamLeaderDashboard from './TeamLeaderDashboard';
 import EditorManagement from './EditorManagement';
 import NotificationCenter from './NotificationCenter';
 import OverdueOrders from './OverdueOrders';
+import EditorMonthlyOrders from './EditorMonthlyOrders';
+import EditorMonthlySummary from './EditorMonthlySummary';
 
 
 const drawerWidth = 240;
@@ -59,6 +61,7 @@ const Dashboard = () => {
     const [pendingCount, setPendingCount] = useState(0);
     const [viewHistory, setViewHistory] = useState([]);
     const [highlightedOrderId, setHighlightedOrderId] = useState(null);
+    const [selectedEditorData, setSelectedEditorData] = useState(null);
 
     useEffect(() => {
         if (isTeamLeader || !user?.email) return;
@@ -146,8 +149,18 @@ const Dashboard = () => {
     const handleNotificationClick = (orderId) => {
         if (orderId) {
             setHighlightedOrderId(orderId);
-            handleViewChange('orders');
+            handleViewChange(isTeamLeader ? 'tl-dashboard' : 'orders');
         }
+    };
+
+    const handleEditorPerformanceClick = (data) => {
+        setSelectedEditorData(data);
+        handleViewChange('editor-monthly');
+    };
+
+    const handleNavigateToPerformance = () => {
+        setSelectedEditorData({});
+        handleViewChange('editor-monthly');
     };
 
     const menuItems = isTeamLeader ? [
@@ -157,6 +170,7 @@ const Dashboard = () => {
         { text: 'TL Dashboard', icon: <DashboardIcon />, view: 'tl-dashboard' },
         { text: 'Editor Insights', icon: <AssessmentIcon />, view: 'User Management' },
         { text: 'Overdue Orders', icon: <ReportIcon />, view: 'overdue-orders' },
+
         //text: 'Notifications', icon: <Badge badgeContent={pendingCount} color="error"><NotificationsIcon /></Badge>, view: 'notifications' },
     ] : [
         {
@@ -169,31 +183,40 @@ const Dashboard = () => {
             view: 'orders'
         },
         { text: 'Self Order', icon: <AddIcon />, view: 'self-order' },
+        // { text: 'My Summary', icon: <AssessmentIcon />, view: 'my-summary' },
         // { text: 'Notifications', icon: <Badge badgeContent={pendingCount} color="error"><NotificationsIcon /></Badge>, view: 'notifications' },
     ];
 
     const renderView = () => {
         switch (currentView) {
             case 'analytics':
-                return <Analytics onNavigateToPerformance={() => handleViewChange('User Management')} />;
+                return <Analytics onNavigateToPerformance={handleNavigateToPerformance} onEditorClick={handleEditorPerformanceClick} />;
             case 'create':
                 return <OrderForm onOrderCreated={() => handleViewChange('orders')} />;
             case 'self-order':
                 return <SelfOrderForm onOrderCreated={() => handleViewChange('orders')} />;
             case 'orders':
-                return isTeamLeader
-                    ? <OrdersList highlightOrderId={highlightedOrderId} onClearHighlight={() => setHighlightedOrderId(null)} />
-                    : <EditorDashboard highlightOrderId={highlightedOrderId} onClearHighlight={() => setHighlightedOrderId(null)} />;
+                return <EditorDashboard highlightOrderId={highlightedOrderId} onClearHighlight={() => setHighlightedOrderId(null)} />;
             case 'migration':
                 return <MigrationTool />;
             case 'tl-dashboard':
-                return <TeamLeaderDashboard />;
+                return <TeamLeaderDashboard highlightOrderId={highlightedOrderId} onClearHighlight={() => setHighlightedOrderId(null)} />;
             case 'User Management':
                 return <EditorManagement />;
             case 'overdue-orders':
                 return <OverdueOrders />;
             case 'notifications':
                 return <NotificationCenter fullPage={true} onNotificationClick={handleNotificationClick} />;
+            case 'editor-monthly':
+                return (
+                    <EditorMonthlyOrders
+                        {...selectedEditorData}
+                        onBack={() => handleBack()}
+                        key={selectedEditorData?.editorEmail} // Force remount on editor change
+                    />
+                );
+            // case 'my-summary':
+            //  return <EditorMonthlySummary />;
             default:
                 return <div>Select a view</div>;
         }

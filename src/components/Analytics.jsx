@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOrders } from '../hooks/useOrders';
 import { useEditorStats } from '../context/EditorStatsContext';
-import { Card, CardContent, Typography, Grid, Box, Select, MenuItem, FormControl, InputLabel, Button, Chip, LinearProgress, Avatar, Tooltip as MuiTooltip } from '@mui/material';
+import { Card, CardContent, Typography, Grid, Box, Select, MenuItem, FormControl, InputLabel, Button, Chip, LinearProgress, Avatar, Tooltip as MuiTooltip, IconButton } from '@mui/material';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, ResponsiveContainer } from 'recharts';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -16,13 +16,17 @@ import {
     TrendingUp as TrendingUpIcon,
     Group as GroupIcon,
     EmojiEvents as TrophyIcon,
+    Brightness4,
+    Brightness7,
 } from '@mui/icons-material';
 
-const Analytics = ({ onNavigateToPerformance }) => {
+const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
     const { orders, loading: ordersLoading } = useOrders();
     const { editorStats, loading: statsLoading } = useEditorStats();
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+    const [performanceFilter, setPerformanceFilter] = useState('month');
     const [editors, setEditors] = useState([]);
+    const [darkMode, setDarkMode] = useState(false);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -36,6 +40,85 @@ const Analytics = ({ onNavigateToPerformance }) => {
         });
         return () => unsubscribe();
     }, []);
+
+    const getWeekNumber = (d) => {
+        d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+        d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+        const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+        return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    };
+
+    const performanceGraphData = React.useMemo(() => {
+        if (!orders || !orders.length || !editors.length) return [];
+
+        const now = new Date();
+        let startDate = new Date();
+
+        switch (performanceFilter) {
+            case 'month':
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                break;
+            case 'quarter':
+                startDate = new Date();
+                startDate.setMonth(now.getMonth() - 3);
+                break;
+            case 'half-year':
+                startDate = new Date();
+                startDate.setMonth(now.getMonth() - 6);
+                break;
+            case 'year':
+                startDate = new Date(now.getFullYear(), 0, 1);
+                break;
+            default:
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        }
+
+        const filteredOrders = orders.filter(o => {
+            const created = o.createdAt?.toDate();
+            return created && created >= startDate;
+        });
+
+        const weeksMap = {};
+
+        filteredOrders.forEach(o => {
+            const created = o.createdAt.toDate();
+            const weekNum = getWeekNumber(created);
+            const year = created.getFullYear();
+            const key = `${year}-W${weekNum}`;
+
+            if (!weeksMap[key]) {
+                weeksMap[key] = {
+                    name: `W${weekNum}`,
+                    sortKey: key,
+                    ...editors.reduce((acc, e) => ({ ...acc, [e.email]: { assigned: 0, completed: 0 } }), {})
+                };
+            }
+
+            if (o.assignedEditorEmails) {
+                o.assignedEditorEmails.forEach(email => {
+                    if (weeksMap[key][email]) {
+                        weeksMap[key][email].assigned += 1;
+                        if (o.status === 'completed') {
+                            weeksMap[key][email].completed += 1;
+                        }
+                    }
+                });
+            }
+        });
+
+        const data = Object.values(weeksMap).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+        return data.map(week => {
+            const point = { name: week.name };
+            editors.forEach(e => {
+                const stats = week[e.email];
+                point[e.email] = (stats && stats.assigned > 0)
+                    ? Number((stats.completed / stats.assigned).toFixed(2))
+                    : 0;
+            });
+            return point;
+        });
+    }, [orders, editors, performanceFilter]);
 
     if (ordersLoading || statsLoading) return <div>Loading...</div>;
 
@@ -151,10 +234,17 @@ const Analytics = ({ onNavigateToPerformance }) => {
         };
     })();
 
+    const GRAPH_COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#a4de6c', '#d0ed57'];
+
     return (
         <Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-                <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>Dashboard</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>Dashboard</Typography>
+                    <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
+                        {darkMode ? <Brightness7 /> : <Brightness4 />}
+                    </IconButton>
+                </Box>
                 <Button
                     variant="contained"
                     color="primary"
@@ -308,9 +398,10 @@ const Analytics = ({ onNavigateToPerformance }) => {
                                 <Card key={order.id} variant="outlined" sx={{ mb: 1.5, p: 1.5, bgcolor: 'rgba(255,255,255,0.6)', borderColor: 'error.light' }}>
                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                         <Box sx={{ width: '70%' }}>
-                                            <Typography variant="subtitle2" noWrap sx={{ fontWeight: 'bold' }}>{order.name || order.id}</Typography>
-                                            <Typography variant="caption" color="error" sx={{ fontWeight: 'bold', display: 'block' }}>Delayed</Typography>
-                                            <Box sx={{ display: 'flex', mt: 1 }}>
+                                            <Typography variant="subtitle2" noWrap sx={{ fontWeight: 'bold' }}>{(order.name || order.id && assignedEditorEmails.email[0])}</Typography>
+                                            {/* <Typography src={(editor?.photoURL) || (editor?.displayName?.[0] || email[0]).toUpperCase()}></Typography> */}
+                                            {/* <Typography variant="caption" color="error" sx={{ fontWeight: 'bold', display: 'block' }}>Delayed</Typography> */}
+                                            {/* <Box sx={{ display: 'flex', mt: 1 }}>
                                                 {order.assignedEditorEmails?.map((email) => {
                                                     const editor = editors.find(e => e.email === email);
                                                     return (
@@ -321,7 +412,7 @@ const Analytics = ({ onNavigateToPerformance }) => {
                                                         </MuiTooltip>
                                                     );
                                                 })}
-                                            </Box>
+                                            </Box> */}
                                         </Box>
                                         {(order.images?.[0] || order.image) && (
                                             <MuiTooltip
@@ -355,7 +446,27 @@ const Analytics = ({ onNavigateToPerformance }) => {
 
                         return (
                             <Grid item xs={12} sm={6} md={3} key={editor.email}>
-                                <Card variant="outlined" sx={{ p: 2, backgroundColor: 'rgba(255, 255, 255, 0.4)' }}>
+                                <Card
+                                    variant="outlined"
+                                    sx={{
+                                        p: 2,
+                                        backgroundColor: 'rgba(255, 255, 255, 0.4)',
+                                        cursor: 'pointer',
+                                        transition: 'transform 0.2s',
+                                        '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }
+                                    }}
+                                    onClick={() => {
+                                        const editorMonthlyOrders = orders.filter(o => {
+                                            const d = o.createdAt?.toDate();
+                                            return d && d.getMonth() === currentMonth && d.getFullYear() === currentYear && o.assignedEditorEmails?.includes(editor.email);
+                                        });
+                                        if (onEditorClick) {
+                                            onEditorClick({ editorEmail: editor.email, editorName: editor.name, month: currentMonth, year: currentYear, orders: editorMonthlyOrders });
+                                        } else {
+                                            navigate('/orders/editor-monthly', { state: { editorEmail: editor.email, editorName: editor.name, month: currentMonth, year: currentYear, orders: editorMonthlyOrders } });
+                                        }
+                                    }}
+                                >
                                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                                         {editor.photoURL ? (
                                             <Avatar src={editor.photoURL} sx={{ width: 32, height: 32, mr: 1 }} />
@@ -444,6 +555,46 @@ const Analytics = ({ onNavigateToPerformance }) => {
                         <Tooltip />
                         <Legend />
                         <Line type="monotone" dataKey="orders" stroke="#8884d8" strokeWidth={2} />
+                    </LineChart>
+                </ResponsiveContainer>
+            </Card>
+
+            {/* Editor Performance Trends Graph */}
+            <Card sx={{ p: 3, mt: 4, backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(10px)', borderRadius: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h6">Editor Performance Trends</Typography>
+                    <FormControl size="small" sx={{ minWidth: 120 }}>
+                        <InputLabel>Period</InputLabel>
+                        <Select
+                            value={performanceFilter}
+                            label="Period"
+                            onChange={(e) => setPerformanceFilter(e.target.value)}
+                        >
+                            <MenuItem value="month">This Month</MenuItem>
+                            <MenuItem value="quarter">Last Quarter</MenuItem>
+                            <MenuItem value="half-year">Half Year</MenuItem>
+                            <MenuItem value="year">This Year</MenuItem>
+                        </Select>
+                    </FormControl>
+                </Box>
+                <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={performanceGraphData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis domain={[0, 1]} />
+                        <Tooltip />
+                        <Legend />
+                        {editors.map((editor, index) => (
+                            <Line
+                                key={editor.email}
+                                type="monotone"
+                                dataKey={editor.email}
+                                name={editor.displayName || editor.email.split('@')[0]}
+                                stroke={GRAPH_COLORS[index % GRAPH_COLORS.length]}
+                                strokeWidth={2}
+                                dot={{ r: 4 }}
+                            />
+                        ))}
                     </LineChart>
                 </ResponsiveContainer>
             </Card>
