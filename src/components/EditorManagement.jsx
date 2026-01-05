@@ -161,13 +161,15 @@ const EditorManagement = () => {
         <Box sx={{ p: { xs: 2, md: 3 } }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h5" gutterBottom sx={{ mb: 0 }}>Editor Insights & Management</Typography>
-                <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
+                {/* <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
                     {darkMode ? <Brightness7 /> : <Brightness4 />}
-                </IconButton>
+                </IconButton> */}
             </Box >
 
             {/* Analytics Dashboard Section */}
-            < Grid container spacing={{ xs: 2, md: 3 }} sx={{ mb: 4 }}>
+            < Grid container spacing={{ xs: 2, md: 3 }} sx={{
+                mb: 4
+            }}>
                 <Grid item xs={12} sm={6} md={4}>
                     <Card>
                         <CardContent>

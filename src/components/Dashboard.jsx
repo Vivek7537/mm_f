@@ -192,7 +192,7 @@ const Dashboard = () => {
             case 'analytics':
                 return <Analytics onNavigateToPerformance={handleNavigateToPerformance} onEditorClick={handleEditorPerformanceClick} />;
             case 'create':
-                return <OrderForm onOrderCreated={() => handleViewChange('orders')} />;
+                return <OrderForm onOrderCreated={() => handleViewChange('tl-dashboard')} />;
             case 'self-order':
                 return <SelfOrderForm onOrderCreated={() => handleViewChange('orders')} />;
             case 'orders':

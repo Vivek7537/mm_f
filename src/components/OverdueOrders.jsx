@@ -103,8 +103,17 @@ const OverdueOrders = () => {
         return <CircularProgress />;
     }
 
+    // desktop
+
+
     return (
-        <Box sx={{ width: '78vw' }}>
+        <Box sx={{
+            width: {
+                xs: '93vw',   // mobile
+                sm: '100vw',   // tablet
+                md: '79vw',
+            }
+        }}>
             <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>Overdue Orders</Typography>
             <Paper sx={{ mb: 3, backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(10px)' }}>
                 <Tabs value={tab} onChange={(e, newValue) => setTab(newValue)} centered>

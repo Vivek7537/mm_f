@@ -128,7 +128,7 @@ const SelfOrderForm = ({ onOrderCreated }) => {
     };
 
     return (
-        <Box sx={{ maxWidth: '100%', mx: 'auto', mt: 4 }}>
+        <Box sx={{ width: { xs: '93vw', sm: '99vw', md: '100vw' }, mx: 'auto', mt: 4 }}>
             <Paper sx={{
                 p: 4,
                 borderRadius: 4,
@@ -141,22 +141,20 @@ const SelfOrderForm = ({ onOrderCreated }) => {
                     <Typography variant="h4" fontWeight={700}>
                         Create Self Order
                     </Typography>
-                    <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
-                        {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
-                    </IconButton>
+
                 </Box>
 
                 <Box component="form" onSubmit={handleSubmit}>
                     <Grid container spacing={3}>
                         <Grid item xs={12}>
-                            <GradientTextField fullWidth sx={{ width: '320px' }} label="Client / Order Name" name="name" value={form.name} onChange={handleChange} required />
+                            <GradientTextField fullWidth sx={{ width: { xs: '75vw', sm: '320px', md: '320px' } }} label="Client / Order Name" name="name" value={form.name} onChange={handleChange} required />
                         </Grid>
 
                         <Grid item xs={12}>
-                            <GradientTextField fullWidth sx={{ width: '320px' }} label="Telecaller" name="telecaller" value={form.telecaller} onChange={handleChange} required />
+                            <GradientTextField fullWidth sx={{ width: { xs: '75vw', sm: '320px', md: '320px' } }} label="Telecaller" name="telecaller" value={form.telecaller} onChange={handleChange} required />
                         </Grid>
                         <Grid item xs={12}>
-                            <FormControl fullWidth sx={{ width: '320px' }}>
+                            <FormControl fullWidth sx={{ width: { xs: '75vw', sm: '320px', md: '320px' } }}>
                                 <InputLabel>Priority</InputLabel>
                                 <Select name="priority" value={form.priority} label="Priority" onChange={handleChange}>
                                     <MenuItem value="normal">Normal</MenuItem>
@@ -166,7 +164,7 @@ const SelfOrderForm = ({ onOrderCreated }) => {
                             </FormControl>
                         </Grid>
                         <Grid item xs={12} md={6}>
-                            <GradientTextField sx={{ width: '320px', height: 'auto' }} label="Remark" name="remark" value={form.remark} onChange={handleChange} multiline rows={3} />
+                            <GradientTextField sx={{ width: { xs: '75vw', sm: '320px', md: '320px' }, height: '18vh' }} label="Remark" name="remark" value={form.remark} onChange={handleChange} multiline rows={7} />
                         </Grid>
                         {/* 
                         <Grid item >
@@ -184,7 +182,7 @@ const SelfOrderForm = ({ onOrderCreated }) => {
                         </Grid> */}
 
                         <Grid item xs={12}>
-                            <Typography fontWeight={600} mb={1}>Sample Image</Typography>
+                            <Typography fontWeight={300} mb={1}>Sample Image</Typography>
                             <RadioGroup row name="imageType" value={form.imageType} onChange={handleChange}>
                                 <FormControlLabel value="upload" control={<Radio />} label="Upload" />
                                 <FormControlLabel value="url" control={<Radio />} label={<Typography>URL <Link href="https://imgbb.com/" target="_blank" sx={{ ml: 0.5 }}>(host here)</Link></Typography>} />

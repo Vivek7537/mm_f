@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOrders } from '../hooks/useOrders';
 import { useEditorStats } from '../context/EditorStatsContext';
-import { Card, CardContent, Typography, Grid, Box, Select, MenuItem, FormControl, InputLabel, Button, Chip, LinearProgress, Avatar, Tooltip as MuiTooltip, IconButton } from '@mui/material';
+import { Card, CardContent, Typography, Grid, Box, Select, MenuItem, FormControl, InputLabel, Button, Chip, LinearProgress, Avatar, Tooltip as MuiTooltip, IconButton, Menu } from '@mui/material';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, ResponsiveContainer } from 'recharts';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -14,19 +14,22 @@ import {
     Pending as PendingIcon,
     People as PeopleIcon,
     TrendingUp as TrendingUpIcon,
+
     Group as GroupIcon,
     EmojiEvents as TrophyIcon,
     Brightness4,
     Brightness7,
+    FilterList as FilterListIcon,
 } from '@mui/icons-material';
 
 const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
     const { orders, loading: ordersLoading } = useOrders();
     const { editorStats, loading: statsLoading } = useEditorStats();
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-    const [performanceFilter, setPerformanceFilter] = useState('month');
     const [editors, setEditors] = useState([]);
     const [darkMode, setDarkMode] = useState(false);
+    const [barChartFilter, setBarChartFilter] = useState('month');
+    const [filterAnchorEl, setFilterAnchorEl] = useState(null);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -41,20 +44,53 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
         return () => unsubscribe();
     }, []);
 
-    const getWeekNumber = (d) => {
-        d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-        d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-        const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-        return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-    };
+    const targetStats = React.useMemo(() => {
+        if (!orders) return [];
+        const now = new Date();
+        const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
 
-    const performanceGraphData = React.useMemo(() => {
-        if (!orders || !orders.length || !editors.length) return [];
+        return editors
+            .filter(e => e.targets && e.targets[currentMonthKey] > 0)
+            .map((editor, index) => {
+                const target = editor.targets[currentMonthKey];
+                const completedCount = orders.filter(o => {
+                    const orderDate = o.createdAt?.toDate ? o.createdAt.toDate() : null;
+                    if (!orderDate) return false;
+                    if (orderDate.getMonth() !== currentMonth || orderDate.getFullYear() !== currentYear) return false;
+
+                    if (!o.assignedEditorEmails?.includes(editor.email)) return false;
+
+                    if (o.assignedEditorEmails.length > 1) {
+                        return o.completedBy?.includes(editor.email);
+                    }
+
+                    return o.status === 'completed';
+                }).length;
+
+                return {
+                    id: editor.id,
+                    name: editor.displayName || editor.email.split('@')[0],
+                    target,
+                    completed: completedCount,
+                    progress: Math.min((completedCount / target) * 100, 100),
+                    colorIndex: index
+                };
+            });
+    }, [editors, orders]);
+
+    const barChartData = React.useMemo(() => {
+        if (!orders || !editors) return [];
 
         const now = new Date();
-        let startDate = new Date();
+        let startDate = new Date(0);
 
-        switch (performanceFilter) {
+        switch (barChartFilter) {
+            case 'week':
+                startDate = new Date();
+                startDate.setDate(now.getDate() - 7);
+                break;
             case 'month':
                 startDate = new Date(now.getFullYear(), now.getMonth(), 1);
                 break;
@@ -62,15 +98,11 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                 startDate = new Date();
                 startDate.setMonth(now.getMonth() - 3);
                 break;
-            case 'half-year':
-                startDate = new Date();
-                startDate.setMonth(now.getMonth() - 6);
-                break;
             case 'year':
                 startDate = new Date(now.getFullYear(), 0, 1);
                 break;
             default:
-                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                startDate = new Date(0);
         }
 
         const filteredOrders = orders.filter(o => {
@@ -78,47 +110,15 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
             return created && created >= startDate;
         });
 
-        const weeksMap = {};
-
-        filteredOrders.forEach(o => {
-            const created = o.createdAt.toDate();
-            const weekNum = getWeekNumber(created);
-            const year = created.getFullYear();
-            const key = `${year}-W${weekNum}`;
-
-            if (!weeksMap[key]) {
-                weeksMap[key] = {
-                    name: `W${weekNum}`,
-                    sortKey: key,
-                    ...editors.reduce((acc, e) => ({ ...acc, [e.email]: { assigned: 0, completed: 0 } }), {})
-                };
-            }
-
-            if (o.assignedEditorEmails) {
-                o.assignedEditorEmails.forEach(email => {
-                    if (weeksMap[key][email]) {
-                        weeksMap[key][email].assigned += 1;
-                        if (o.status === 'completed') {
-                            weeksMap[key][email].completed += 1;
-                        }
-                    }
-                });
-            }
+        return editors.map(editor => {
+            const editorOrders = filteredOrders.filter(o => o.assignedEditorEmails?.includes(editor.email));
+            return {
+                name: editor.displayName || editor.email.split('@')[0],
+                assigned: editorOrders.length,
+                completed: editorOrders.filter(o => o.status === 'completed').length,
+            };
         });
-
-        const data = Object.values(weeksMap).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-
-        return data.map(week => {
-            const point = { name: week.name };
-            editors.forEach(e => {
-                const stats = week[e.email];
-                point[e.email] = (stats && stats.assigned > 0)
-                    ? Number((stats.completed / stats.assigned).toFixed(2))
-                    : 0;
-            });
-            return point;
-        });
-    }, [orders, editors, performanceFilter]);
+    }, [orders, editors, barChartFilter]);
 
     if (ordersLoading || statsLoading) return <div>Loading...</div>;
 
@@ -200,16 +200,17 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
     // Calculate Top Performer (Team-wide)
     const topPerformer = (() => {
         const thisMonthCompleted = orders.filter(o => {
-            const created = o.createdAt?.toDate();
+            const date = o.completedAt?.toDate ? o.completedAt.toDate() : (o.createdAt?.toDate ? o.createdAt.toDate() : null);
             return o.status === 'completed' &&
-                created &&
-                created.getMonth() === currentMonth &&
-                created.getFullYear() === currentYear;
+                date &&
+                date.getMonth() === currentMonth &&
+                date.getFullYear() === currentYear;
         });
 
         const counts = {};
         thisMonthCompleted.forEach(o => {
-            o.assignedEditorEmails?.forEach(email => {
+            const contributors = (o.completedBy && o.completedBy.length > 0) ? o.completedBy : o.assignedEditorEmails;
+            contributors?.forEach(email => {
                 counts[email] = (counts[email] || 0) + 1;
             });
         });
@@ -234,20 +235,24 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
         };
     })();
 
-    const GRAPH_COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#a4de6c', '#d0ed57'];
+    const getEditorColor = (index) => {
+        const colors = ['#2196f3', '#9c27b0', '#009688', '#ff9800', '#f44336', '#3f51b5', '#e91e63', '#795548'];
+        return colors[index % colors.length];
+    };
 
     return (
         <Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>Dashboard</Typography>
-                    <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
+                    {/* <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
                         {darkMode ? <Brightness7 /> : <Brightness4 />}
-                    </IconButton>
+                    </IconButton> */}
                 </Box>
                 <Button
                     variant="contained"
                     color="primary"
+
                     onClick={onNavigateToPerformance}
                     sx={{ borderRadius: 2 }}
                 >
@@ -259,8 +264,8 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
 
             {/* Summary Cards */}
             <Grid container spacing={3} sx={{ mb: 4 }}>
-                <Grid item xs={12} sm={6} md={4}>
-                    <Card sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4 }}>
+                <Grid item xs={6} sm={6} md={4}>
+                    <Card sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4, width: { xs: '93vw', md: '100%', sm: '100%' } }}>
                         <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
                             <Box sx={{ p: 1.5, borderRadius: '50%', bgcolor: 'rgba(33, 150, 243, 0.1)', mr: 2, display: 'flex' }}>
                                 <TotalIcon sx={{ fontSize: 32, color: '#2196F3' }} />
@@ -272,9 +277,9 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                         </CardContent>
                     </Card>
                 </Grid>
-                <Grid item xs={12} sm={6} md={4}>
+                <Grid item xs={6} sm={6} md={4}>
                     <Card
-                        sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4, cursor: 'pointer', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}
+                        sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4, cursor: 'pointer', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' }, width: { xs: '93vw', md: '100%', sm: '100%' } }}
                         onClick={() => navigate('/orders/monthly', { state: { orders: monthlyOrders, month: currentMonth, year: currentYear } })}
                     >
                         <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
@@ -288,8 +293,8 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                         </CardContent>
                     </Card>
                 </Grid>
-                <Grid item xs={12} sm={6} md={4}>
-                    <Card sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4 }}>
+                <Grid item xs={6} sm={6} md={4}>
+                    <Card sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4, width: { xs: '93vw', md: '100%', sm: '100%' } }}>
                         <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
                             <Box sx={{ p: 1.5, borderRadius: '50%', bgcolor: 'rgba(255, 152, 0, 0.1)', mr: 2, display: 'flex' }}>
                                 <PendingIcon sx={{ fontSize: 32, color: '#FF9800' }} />
@@ -302,7 +307,7 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                     </Card>
                 </Grid>
                 <Grid item xs={12} sm={6} md={4}>
-                    <Card sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4 }}>
+                    <Card sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4, boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4, width: { xs: '93vw', md: '100%', sm: '100%' } }}>
                         <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
                             <Box sx={{ p: 1.5, borderRadius: '50%', bgcolor: 'rgba(76, 175, 80, 0.1)', mr: 2, display: 'flex' }}>
                                 <TimeIcon sx={{ fontSize: 32, color: '#4CAF50' }} />
@@ -315,7 +320,7 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                     </Card>
                 </Grid>
                 <Grid item xs={12} sm={6} md={4}>
-                    <Card sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4 }}>
+                    <Card sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4, boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4, width: { xs: '93vw', md: '100%', sm: '100%' } }}>
                         <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
                             <Box sx={{ p: 1.5, borderRadius: '50%', bgcolor: 'rgba(25, 118, 210, 0.1)', mr: 2, display: 'flex' }}>
                                 <TrendingUpIcon sx={{ fontSize: 32, color: '#1976D2' }} />
@@ -329,7 +334,7 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                 </Grid>
 
                 <Grid item xs={12} sm={6} md={4}>
-                    <Card sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4 }}>
+                    <Card sx={{ height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)', borderRadius: 4, width: { xs: '93vw', md: '100%', sm: '100%' } }}>
                         <CardContent sx={{ display: 'flex', alignItems: 'center', p: 3 }}>
                             <Box sx={{ p: 1.5, borderRadius: '50%', bgcolor: 'rgba(255, 215, 0, 0.1)', mr: 2, display: 'flex' }}>
                                 <TrophyIcon sx={{ fontSize: 32, color: '#FFD700' }} />
@@ -355,11 +360,33 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
 
             {/* Analytics Section */}
             <Grid container spacing={{ xs: 2, md: 3 }} sx={{ mb: 4 }}>
-                <Grid item xs={12} md={12} lg={6}>
-                    <Card sx={{ p: { xs: 2, md: 3 }, backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(10px)', borderRadius: 3 }}>
-                        <Typography variant="h6" gutterBottom>Editor Performance</Typography>
+                <Grid item xs={12} md={12} lg={4}>
+                    <Card sx={{
+                        p: { xs: 2, md: 3 }, backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(10px)', borderRadius: 3, width: {
+                            xs: '93vw',
+                            sm: '100%',
+                            md: '100%',
+                        },
+                    }}>
+                        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                            <Typography variant="h6" gutterBottom sx={{ mb: 0 }}>Editor Performance</Typography>
+                            <IconButton size="small" onClick={(e) => setFilterAnchorEl(e.currentTarget)}>
+                                <FilterListIcon fontSize="small" />
+                            </IconButton>
+                            <Menu
+                                anchorEl={filterAnchorEl}
+                                open={Boolean(filterAnchorEl)}
+                                onClose={() => setFilterAnchorEl(null)}
+                            >
+                                <MenuItem onClick={() => { setBarChartFilter('week'); setFilterAnchorEl(null); }}>Weekly</MenuItem>
+                                <MenuItem onClick={() => { setBarChartFilter('month'); setFilterAnchorEl(null); }}>Monthly</MenuItem>
+                                <MenuItem onClick={() => { setBarChartFilter('quarter'); setFilterAnchorEl(null); }}>Quarterly</MenuItem>
+                                <MenuItem onClick={() => { setBarChartFilter('year'); setFilterAnchorEl(null); }}>Yearly</MenuItem>
+                                <MenuItem onClick={() => { setBarChartFilter('all'); setFilterAnchorEl(null); }}>All Time</MenuItem>
+                            </Menu>
+                        </Box>
                         <ResponsiveContainer width="100%" height={300}>
-                            <BarChart data={performanceData}>
+                            <BarChart data={barChartData}>
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis dataKey="name" />
                                 <YAxis />
@@ -371,8 +398,14 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                         </ResponsiveContainer>
                     </Card>
                 </Grid>
-                <Grid item xs={12} md={12} lg={3}>
-                    <Card sx={{ p: 3, height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(10px)', borderRadius: 3 }}>
+                <Grid item xs={12} md={6} lg={2}>
+                    <Card sx={{
+                        p: 3, height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(10px)', borderRadius: 3, width: {
+                            xs: '93vw',
+                            sm: '100%',
+                            md: '100%',
+                        },
+                    }}>
                         <Typography variant="h6" gutterBottom>Pending Orders by Editor</Typography>
                         <Box sx={{ mt: 2 }}>
                             {pendingData.map((item) => (
@@ -387,8 +420,15 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                         </Box>
                     </Card>
                 </Grid>
-                <Grid item xs={12} md={12} lg={3}>
-                    <Card sx={{ p: 3, height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(10px)', borderRadius: 3, border: '1px solid #ffcdd2' }}>
+                <Grid item xs={12} md={6} lg={3}>
+                    <Card sx={{
+                        p: 3, height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(10px)', borderRadius: 3, border: '1px solid #ffcdd2',
+                        width: {
+                            xs: '93vw',
+                            sm: '100%',
+                            md: '100%',
+                        },
+                    }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                             <Typography variant="h6" color="error" sx={{ fontWeight: 'bold' }}>Delayed Orders &nbsp;</Typography>
                             <Chip label="  3 Days" color="error" size="small" />
@@ -432,6 +472,44 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                         </Box>
                     </Card>
                 </Grid>
+                <Grid item xs={12} md={6} lg={3}>
+                    <Card sx={{
+                        p: 3, height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(10px)', borderRadius: 3, width: {
+                            xs: '93vw',
+                            sm: '100%',
+                            md: '120%',
+                        },
+                    }}>
+                        <Typography variant="h6" gutterBottom>Monthly Targets</Typography>
+                        <Box sx={{ mt: 2, maxHeight: 300, overflowY: 'auto' }}>
+                            {targetStats.length === 0 ? (
+                                <Typography color="textSecondary" variant="body2">No targets set for this month.</Typography>
+                            ) : (
+                                targetStats.map((stat) => (
+                                    <Box key={stat.id} sx={{ mb: 2 }}>
+                                        <Box display="flex" justifyContent="space-between" mb={0.5} alignItems="flex-end">
+                                            <Typography variant="subtitle2" fontWeight="bold" noWrap sx={{ maxWidth: '70%' }}>{stat.name}</Typography>
+                                            <Typography variant="caption" fontWeight="bold" color="text.secondary">{stat.completed} / {stat.target}</Typography>
+                                        </Box>
+                                        <LinearProgress
+                                            variant="determinate"
+                                            value={stat.progress}
+                                            sx={{
+                                                height: 8,
+                                                borderRadius: 4,
+                                                bgcolor: 'red.200',
+                                                '& .MuiLinearProgress-bar': {
+                                                    bgcolor: getEditorColor(stat.colorIndex),
+                                                    borderRadius: 4
+                                                }
+                                            }}
+                                        />
+                                    </Box>
+                                ))
+                            )}
+                        </Box>
+                    </Card>
+                </Grid>
             </Grid>
 
             {/* Editor Status Overview */}
@@ -449,6 +527,7 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                                 <Card
                                     variant="outlined"
                                     sx={{
+                                        width: { xs: '80vw', md: '100%', sm: '100%' },
                                         p: 2,
                                         backgroundColor: 'rgba(255, 255, 255, 0.4)',
                                         cursor: 'pointer',
@@ -555,46 +634,6 @@ const Analytics = ({ onNavigateToPerformance, onEditorClick }) => {
                         <Tooltip />
                         <Legend />
                         <Line type="monotone" dataKey="orders" stroke="#8884d8" strokeWidth={2} />
-                    </LineChart>
-                </ResponsiveContainer>
-            </Card>
-
-            {/* Editor Performance Trends Graph */}
-            <Card sx={{ p: 3, mt: 4, backgroundColor: 'rgba(255, 255, 255, 0.6)', backdropFilter: 'blur(10px)', borderRadius: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="h6">Editor Performance Trends</Typography>
-                    <FormControl size="small" sx={{ minWidth: 120 }}>
-                        <InputLabel>Period</InputLabel>
-                        <Select
-                            value={performanceFilter}
-                            label="Period"
-                            onChange={(e) => setPerformanceFilter(e.target.value)}
-                        >
-                            <MenuItem value="month">This Month</MenuItem>
-                            <MenuItem value="quarter">Last Quarter</MenuItem>
-                            <MenuItem value="half-year">Half Year</MenuItem>
-                            <MenuItem value="year">This Year</MenuItem>
-                        </Select>
-                    </FormControl>
-                </Box>
-                <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={performanceGraphData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" />
-                        <YAxis domain={[0, 1]} />
-                        <Tooltip />
-                        <Legend />
-                        {editors.map((editor, index) => (
-                            <Line
-                                key={editor.email}
-                                type="monotone"
-                                dataKey={editor.email}
-                                name={editor.displayName || editor.email.split('@')[0]}
-                                stroke={GRAPH_COLORS[index % GRAPH_COLORS.length]}
-                                strokeWidth={2}
-                                dot={{ r: 4 }}
-                            />
-                        ))}
                     </LineChart>
                 </ResponsiveContainer>
             </Card>

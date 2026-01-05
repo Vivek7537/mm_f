@@ -41,9 +41,11 @@ import {
     Rating,
     Grid,
     useTheme,
-    useMediaQuery
+    useMediaQuery,
+    LinearProgress,
+    Slider
 } from '@mui/material';
-import { Person as PersonIcon, AdminPanelSettings as AdminIcon, Group as GroupIcon, PictureAsPdf as PdfIcon, Edit as EditIcon, Delete as DeleteIcon, CloudUpload as CloudUploadIcon, Close as CloseIcon, VerifiedUser as VerifiedUserIcon, Check as CheckIcon } from '@mui/icons-material';
+import { Person as PersonIcon, AdminPanelSettings as AdminIcon, Group as GroupIcon, PictureAsPdf as PdfIcon, Edit as EditIcon, Delete as DeleteIcon, CloudUpload as CloudUploadIcon, Close as CloseIcon, VerifiedUser as VerifiedUserIcon, Check as CheckIcon, EmojiEvents as TrophyIcon, TrackChanges as TargetIcon } from '@mui/icons-material';
 
 const EditOrderDialog = ({ open, onClose, order, editors, onSave, onDelete }) => {
     const theme = useTheme();
@@ -171,7 +173,7 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
     const [filterStatus, setFilterStatus] = useState('all');
     const [filterMonth, setFilterMonth] = useState('all');
     const [filterYear, setFilterYear] = useState(new Date().getFullYear());
-    const [filterAge, setFilterAge] = useState('all');
+    const [searchQuery, setSearchQuery] = useState('');
     const [page, setPage] = useState(0);
     const [rowsPerPage, setRowsPerPage] = useState(20);
     const [ratingDialog, setRatingDialog] = useState({ open: false, order: null, newValue: 0 });
@@ -189,6 +191,11 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
     const [deleteStep, setDeleteStep] = useState(0);
     const [orderToDelete, setOrderToDelete] = useState(null);
     const [approvalDialog, setApprovalDialog] = useState({ open: false, order: null });
+
+    const [targetDialogOpen, setTargetDialogOpen] = useState(false);
+    const [targetEditorId, setTargetEditorId] = useState('');
+    const [targetValue, setTargetValue] = useState(0);
+    const [targetMax, setTargetMax] = useState(0);
 
     // Cleanup notifications older than 12 hours
     useEffect(() => {
@@ -224,7 +231,8 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
                 email: doc.data().email,
                 name: doc.data().displayName || doc.data().email,
                 photoURL: doc.data().photoURL,
-                status: doc.data().status
+                status: doc.data().status,
+                targets: doc.data().targets || {}
             })).filter(e => e.status !== 'Terminated');
             setEditors(fetchedEditors);
         }, (error) => {
@@ -261,6 +269,33 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
             }
         }
     }, [highlightOrderId, orders, onClearHighlight]);
+
+    useEffect(() => {
+        if (targetDialogOpen && targetEditorId) {
+            const editor = editors.find(e => e.id === targetEditorId);
+            if (editor) {
+                const now = new Date();
+                const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+                // Calculate Max (Total Assigned in Current Month)
+                const assignedCount = orders.filter(o => {
+                    if (!o.assignedEditorEmails?.includes(editor.email)) return false;
+                    if (!o.createdAt?.toDate) return false;
+                    const d = o.createdAt.toDate();
+                    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                }).length;
+
+                setTargetMax(assignedCount);
+
+                // Set initial value from DB, clamped to max
+                const dbTarget = editor.targets?.[currentMonthKey] || 0;
+                setTargetValue(Math.min(dbTarget, assignedCount));
+            } else {
+                setTargetValue(0);
+                setTargetMax(0);
+            }
+        }
+    }, [targetEditorId, targetDialogOpen, orders, editors]);
 
     const handleRateOrder = async (order, newValue) => {
         try {
@@ -473,6 +508,23 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
         }
     };
 
+    const handleSaveTarget = async () => {
+        if (!targetEditorId) return;
+        const now = new Date();
+        const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        try {
+            await updateDoc(doc(db, 'users', targetEditorId), {
+                [`targets.${currentMonthKey}`]: targetValue
+            });
+            toast.success("Monthly target updated");
+            setTargetDialogOpen(false);
+        } catch (error) {
+            console.error(error);
+            toast.error("Failed to update target");
+        }
+    };
+
     const getBase64ImageFromURL = (url) => {
         return new Promise((resolve) => {
             const img = new Image();
@@ -536,19 +588,18 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
             }
         }
 
-        // Filter by Age
-        if (filterAge !== 'all') {
-            const cutoff = new Date();
-            cutoff.setDate(cutoff.getDate() - filterAge);
-            // Show only orders that are older than the selected age.
-            // If an order's date is more recent than the cutoff, hide it.
-            if (orderDate >= cutoff) {
+        // Filter by Search Query
+        if (searchQuery) {
+            const query = searchQuery.toLowerCase();
+            const nameMatch = order.name?.toLowerCase().includes(query);
+            const telecallerMatch = order.telecaller?.toLowerCase().includes(query);
+            if (!nameMatch && !telecallerMatch) {
                 return false;
             }
         }
 
         return true;
-    }), [orders, filterEditor, filterStatus, filterMonth, filterYear, filterAge]);
+    }), [orders, filterEditor, filterStatus, filterMonth, filterYear, searchQuery]);
 
     const handleExportPDF = async () => {
         setExporting(true);
@@ -673,7 +724,6 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
                             label="Filter by Month"
                             onChange={(e) => {
                                 setFilterMonth(e.target.value);
-                                setFilterAge('all'); // Reset age filter
                                 setPage(0);
                             }}
                         >
@@ -700,23 +750,17 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
                             <MenuItem value="waiting-approval">Waiting Approval</MenuItem>
                         </Select>
                     </FormControl>
-                    <FormControl size="small" sx={{ minWidth: 180, width: { xs: '100%', sm: 'auto' }, bgcolor: 'rgba(255, 255, 255, 0.4)', backdropFilter: 'blur(5px)', borderRadius: 1 }}>
-                        <InputLabel>Filter by Age</InputLabel>
-                        <Select
-                            value={filterAge}
-                            label="Filter by Age"
-                            onChange={(e) => {
-                                setFilterAge(e.target.value);
-                                setFilterMonth('all'); // Reset month filter
-                                setPage(0);
-                            }}
-                        >
-                            <MenuItem value="all">All Time</MenuItem>
-                            <MenuItem value={3}>Older than 3 days</MenuItem>
-                            <MenuItem value={7}>Older than 7 days</MenuItem>
-                            <MenuItem value={30}>Older than 30 days</MenuItem>
-                        </Select>
-                    </FormControl>
+                    <TextField
+                        size="small"
+                        label="Search Order / Telecaller"
+                        variant="outlined"
+                        value={searchQuery}
+                        onChange={(e) => {
+                            setSearchQuery(e.target.value);
+                            setPage(0);
+                        }}
+                        sx={{ minWidth: 180, width: { xs: '100%', sm: 'auto' }, bgcolor: 'rgba(255, 255, 255, 0.4)', backdropFilter: 'blur(5px)', borderRadius: 1 }}
+                    />
                     <FormControl size="small" sx={{ minWidth: 200, width: { xs: '100%', sm: 'auto' }, bgcolor: 'rgba(255, 255, 255, 0.4)', backdropFilter: 'blur(5px)', borderRadius: 1 }}>
                         <InputLabel>Filter by Editor</InputLabel>
                         <Select
@@ -755,7 +799,7 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
                     >
                         {exporting ? 'Exporting...' : 'Export PDF'}
                     </Button>
-                    <Button
+                    {/* <Button
                         variant="outlined"
                         startIcon={<AdminIcon />}
                         onClick={handleSetupAdmin}
@@ -763,6 +807,16 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
                         sx={{ width: { xs: '100%', sm: 'auto' } }}
                     >
                         Setup Admin Access
+                    </Button> */}
+                    <Button
+                        variant="outlined"
+                        startIcon={<TargetIcon />}
+                        onClick={() => setTargetDialogOpen(true)}
+                        size="small"
+                        color="secondary"
+                        sx={{ width: { xs: '100%', sm: 'auto' } }}
+                    >
+                        Set Target
                     </Button>
                 </Box>
             </Box>
@@ -1031,6 +1085,56 @@ const TeamLeaderDashboard = ({ highlightOrderId, onClearHighlight }) => {
                     <Button fullWidth variant="contained" onClick={handleApproveOrder} startIcon={<CheckIcon />}>Approve This Order Only</Button>
                     <Button fullWidth variant="contained" color="success" onClick={handleApproveEditorAndOrder} startIcon={<VerifiedUserIcon />}>Approve Editor for Self Orders</Button>
                     <Button fullWidth onClick={() => setApprovalDialog({ open: false, order: null })}>Cancel</Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Set Target Dialog */}
+            <Dialog open={targetDialogOpen} onClose={() => setTargetDialogOpen(false)} maxWidth="sm" fullWidth>
+                <DialogTitle>Set Monthly Target</DialogTitle>
+                <DialogContent>
+                    <DialogContentText sx={{ mb: 2 }}>
+                        Set the completion target for the current month.
+                    </DialogContentText>
+
+                    <FormControl fullWidth sx={{ mb: 3, mt: 1 }}>
+                        <InputLabel>Select Editor</InputLabel>
+                        <Select
+                            value={targetEditorId}
+                            label="Select Editor"
+                            onChange={(e) => setTargetEditorId(e.target.value)}
+                        >
+                            {editors.map((editor) => (
+                                <MenuItem key={editor.id} value={editor.id}>{editor.name}</MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+
+                    {targetEditorId && (
+                        <Box sx={{ px: 2 }}>
+                            <Typography gutterBottom>
+                                Target: <strong>{targetValue}</strong> / {targetMax} Assigned Orders
+                            </Typography>
+                            <Slider
+                                value={targetValue}
+                                onChange={(e, newValue) => setTargetValue(newValue)}
+                                valueLabelDisplay="auto"
+                                step={1}
+                                marks
+                                min={0}
+                                max={targetMax}
+                                disabled={targetMax === 0}
+                            />
+                            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                                * Based on orders assigned in {new Date().toLocaleString('default', { month: 'long' })}
+                            </Typography>
+                        </Box>
+                    )}
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setTargetDialogOpen(false)}>Cancel</Button>
+                    <Button onClick={handleSaveTarget} variant="contained" disabled={!targetEditorId}>
+                        Save Target
+                    </Button>
                 </DialogActions>
             </Dialog>
         </Container>

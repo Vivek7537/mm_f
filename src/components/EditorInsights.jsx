@@ -196,9 +196,9 @@ const EditorInsights = () => {
                     <Typography variant="h4" component="h1" gutterBottom sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' }, mb: 0 }}>
                         Editor Insights
                     </Typography>
-                    <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
+                    {/* <IconButton onClick={() => setDarkMode(!darkMode)} color="inherit">
                         {darkMode ? <Brightness7 /> : <Brightness4 />}
-                    </IconButton>
+                    </IconButton> */}
                 </Box>
                 <Tooltip title="Refresh Data">
                     <IconButton color="default">

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp, arrayUnion, arrayRemove, getDoc, getDocs, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -36,7 +36,8 @@ import {
     LinearProgress
 } from '@mui/material';
 import { Lock as LockIcon, Close as CloseIcon, CheckCircle as CheckCircleIcon, Search as SearchIcon, WarningAmber as WarningIcon } from '@mui/icons-material';
-import EditorStats from './EditorStats';
+//import EditorStats from './EditorStats';
+import MonthlyTargetProgress from './MonthlyTargetProgress';
 
 const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
     const { user } = useAuth();
@@ -361,6 +362,33 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
         }
     };
 
+    const currentMonthStats = useMemo(() => {
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        return orders.reduce((acc, order) => {
+            const orderDate = order.createdAt?.toDate ? order.createdAt.toDate() : null;
+            if (orderDate && orderDate.getMonth() === currentMonth && orderDate.getFullYear() === currentYear) {
+                acc.total++;
+
+                // Check if completed specifically by this user (handling shared orders)
+                let isCompleted = order.status === 'completed';
+                if (order.assignedEditorEmails?.length > 1 && order.completedBy?.includes(user?.email)) {
+                    isCompleted = true;
+                }
+
+                if (isCompleted) {
+                    acc.completed++;
+                } else {
+                    acc.active++;
+                }
+            }
+            return acc;
+        }, { total: 0, completed: 0, active: 0 });
+    }, [orders, user]);
+
+    const currentMonthName = new Date().toLocaleString('default', { month: 'short' });
 
     if (loading) {
         return (
@@ -371,28 +399,79 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
     }
 
     return (
-        <Container maxWidth="lg" sx={{ mt: -2, mb: 4, width: '75vw' }}>
-            <Box display="flex" alignItems="center" gap={2} mb={4}>
-                {/* <Typography variant="h4" fontWeight={700}>
+        // <Container sx={{ mt: -2, mb: 4, px: 2, width: '80vw' }}>
+        <Container
+            maxWidth={false}
+            sx={{
+                mt: -2,
+                mb: 4,
+                px: 2,
+                width: {
+                    xs: '93vw',   // mobile
+                    sm: '93vw',   // tablet
+                    md: '80vw',    // desktop
+                },
+                ml: {
+                    md: 'auto',    // aligns content after navbar
+                },
+            }}
+        >
+
+
+
+            <Box display="flex" flexDirection={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems="flex-start" mb={4}>
+                <Box display="flex" alignItems="center" gap={2}>
+                    {/* <Typography variant="h4" fontWeight={700}>
                     My Tasks
                 </Typography> */}
-                {user?.displayName && (
-                    <Typography variant="h5" color="text.secondary" fontWeight={500}>
-                        - {user.displayName}
-                    </Typography>
-                )}
+                    <MonthlyTargetProgress currentMonthCompleted={currentMonthStats.completed} />
+                    {user?.displayName && (
+                        <Typography variant="h5" color="text.secondary" fontWeight={500}>
+                            - {user.displayName}
+                        </Typography>
+
+                    )}
+                </Box>
+
+                <Box display="flex" gap={4} mt={{ xs: 2, md: 0 }} textAlign="right">
+                    <Box>
+
+                        <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                            Orders ({currentMonthName})
+                        </Typography>
+                        <Typography variant="h4" fontWeight={600} color="text.primary">
+                            {currentMonthStats.total}
+                        </Typography>
+                    </Box>
+                    <Box>
+                        <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                            Completed
+                        </Typography>
+                        <Typography variant="h4" fontWeight={700} color="success.main">
+                            {currentMonthStats.completed}
+                        </Typography>
+                    </Box>
+                    <Box>
+                        <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                            Active
+                        </Typography>
+                        <Typography variant="h4" fontWeight={700} color="warning.main">
+                            {currentMonthStats.active}
+                        </Typography>
+                    </Box>
+                </Box>
             </Box>
 
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+            {/* <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
                 <Tabs value={mainTab} onChange={(e, v) => setMainTab(v)}>
                     <Tab label="My Tasks" value="tasks" />
                     {canSeeStats && <Tab label="Statistics" value="stats" />}
                 </Tabs>
-            </Box>
-
+            </Box> */}
+            {/* 
             {mainTab === 'stats' && canSeeStats && (
                 <EditorStats orders={orders} userEmail={user?.email} />
-            )}
+            )} */}
 
             {mainTab === 'tasks' && (
                 <>
@@ -494,15 +573,15 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
                                 const overdueText = isOverdue30 ? '30+ Days' : '3+ Days';
 
                                 return (
-                                    <Grid item xl={6} sm={6} md={4} lg={3} key={order.id}>
+                                    <Grid item xl={6} sm={6} md={6} lg={3} key={order.id}>
                                         <Paper
                                             sx={{
                                                 p: { xs: 1.5, sm: 2 },
                                                 borderRadius: 3,
                                                 boxShadow: '0 10px 30px rgba(0,0,0,0.05)',
                                                 height: '100%',
-                                                minHeight: 360,
-                                                width: '220px',
+                                                minHeight: 320,
+                                                width: { xs: '100%', sm: '220px', md: '240px' },
                                                 display: 'flex',
                                                 flexDirection: 'column',
                                                 justifyContent: 'space-between', // Distribute space

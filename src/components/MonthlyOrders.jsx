@@ -29,7 +29,7 @@ const MonthlyOrders = () => {
   // Handle case where state is missing (e.g., direct URL access)
   if (!location.state) {
     return (
-      <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 4 }}>
+      <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 4, width: '100vw' }}>
         <Typography variant="h6" color="textSecondary" gutterBottom>
           No order data found.
         </Typography>
@@ -73,6 +73,7 @@ const MonthlyOrders = () => {
     <Box sx={{
       p: { xs: 2, md: 4 },
       minHeight: '100vh',
+      minWidth: '90vw',
       background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)'
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
@@ -90,6 +91,12 @@ const MonthlyOrders = () => {
             <Card sx={{
               height: '100%',
               borderRadius: 3,
+              width: {
+                xs: '92vw',   // mobile
+                sm: '99vw',   // tablet
+                md: '85vw',
+              },
+
               boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.07)',
               bgcolor: 'rgba(255, 255, 255, 0.8)',
               backdropFilter: 'blur(10px)'
