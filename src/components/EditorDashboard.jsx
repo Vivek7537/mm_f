@@ -363,6 +363,15 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
         if (!editingOrder) return;
         try {
             let imageUrl = formData.sampleImageUrl;
+
+            // Extract URL from BBCode if present
+            if (imageUrl) {
+                const match = imageUrl.match(/\[img\](.*?)\[\/img\]/i);
+                if (match) {
+                    imageUrl = match[1];
+                }
+            }
+
             if (file) {
                 const storageRef = ref(storage, `samples/${Date.now()}_${file.name}`);
                 await uploadBytes(storageRef, file);
@@ -821,15 +830,15 @@ const EditorDashboard = ({ highlightOrderId, onClearHighlight }) => {
                                                         overflow: 'visible',
                                                         zIndex: 10,
                                                     },
-                                                    '&:hover img': {
-                                                        width: '70%',
-                                                        height: '100%',
-                                                        objectFit: 'contain', // Show full image on hover
-                                                        transform: 'scale(2.3)',
-                                                        boxShadow: 6,
-                                                        borderRadius: 1,
-                                                        bgcolor: 'background.paper'
-                                                    }
+                                                    // '&:hover img': {
+                                                    //     width: '70%',
+                                                    //     height: '100%',
+                                                    //     objectFit: 'contain', // Show full image on hover
+                                                    //     transform: 'scale(2.3)',
+                                                    //     boxShadow: 6,
+                                                    //     borderRadius: 1,
+                                                    //     bgcolor: 'background.paper'
+                                                    // }
                                                 }}
                                             >
                                                 <Box
